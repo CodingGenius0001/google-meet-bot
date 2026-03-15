@@ -1,0 +1,115 @@
+name: Deploy
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-main
+  cancel-in-progress: true
+
+jobs:
+  deploy-vercel:
+    if: >
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') &&
+      secrets.VERCEL_TOKEN != '' &&
+      secrets.VERCEL_ORG_ID != '' &&
+      secrets.VERCEL_PROJECT_ID != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    env:
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Pull Vercel environment
+        run: vercel pull --yes --environment=production --token="$VERCEL_TOKEN"
+
+      - name: Build Vercel artifacts
+        run: vercel build --prod --token="$VERCEL_TOKEN"
+
+      - name: Deploy to Vercel
+        id: deploy
+        run: |
+          DEPLOYMENT_URL=$(vercel deploy --prebuilt --prod --token="$VERCEL_TOKEN")
+          echo "deployment_url=$DEPLOYMENT_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Publish deployment summary
+        run: echo "Vercel deployment: ${{ steps.deploy.outputs.deployment_url }}" >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-railway:
+    if: >
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success') &&
+      secrets.RAILWAY_TOKEN != '' &&
+      secrets.RAILWAY_SERVICE != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      RAILWAY_SERVICE: ${{ secrets.RAILWAY_SERVICE }}
+      RAILWAY_ENVIRONMENT: ${{ secrets.RAILWAY_ENVIRONMENT }}
+      RAILWAY_PROJECT_ID: ${{ secrets.RAILWAY_PROJECT_ID }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Railway CLI
+        run: npm install --global @railway/cli@latest
+
+      - name: Deploy worker to Railway
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARGS=(up --service "$RAILWAY_SERVICE" --ci)
+
+          if [[ -n "${RAILWAY_PROJECT_ID:-}" && -z "${RAILWAY_ENVIRONMENT:-}" ]]; then
+            echo "RAILWAY_ENVIRONMENT must be set when RAILWAY_PROJECT_ID is provided."
+            exit 1
+          fi
+
+          if [[ -n "${RAILWAY_PROJECT_ID:-}" ]]; then
+            ARGS+=(--project "$RAILWAY_PROJECT_ID")
+          fi
+
+          if [[ -n "${RAILWAY_ENVIRONMENT:-}" ]]; then
+            ARGS+=(--environment "$RAILWAY_ENVIRONMENT")
+          fi
+
+          railway "${ARGS[@]}"
+
+      - name: Publish deployment summary
+        run: echo "Railway worker deployment triggered for service $RAILWAY_SERVICE." >> "$GITHUB_STEP_SUMMARY"
+

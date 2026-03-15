@@ -102,6 +102,34 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 - The container starts through `worker/start-worker.sh`, which brings up Xvfb, PulseAudio, and the worker loop.
 - Expose `WORKER_PORT` if your platform expects an HTTP health check.
 
+## GitHub Actions
+
+The repo now includes CI in `.github/workflows/ci.yml` and production deploy automation in `.github/workflows/deploy.yml`.
+
+### Required GitHub secrets
+
+| Secret | Required for | Purpose |
+| --- | --- | --- |
+| `VERCEL_TOKEN` | Vercel deploy | Auth for the Vercel CLI |
+| `VERCEL_ORG_ID` | Vercel deploy | Target Vercel org |
+| `VERCEL_PROJECT_ID` | Vercel deploy | Target Vercel project |
+| `RAILWAY_TOKEN` | Railway deploy | Auth for Railway CLI, ideally a project token |
+| `RAILWAY_SERVICE` | Railway deploy | Service name or service id for the worker |
+| `RAILWAY_ENVIRONMENT` | Optional Railway deploy | Railway environment name or id |
+| `RAILWAY_PROJECT_ID` | Optional Railway deploy | Needed only if you are using an account token instead of a scoped project token |
+
+### Workflow behavior
+
+- Every pull request and push to `main` runs CI.
+- A successful CI run on `main` triggers production deploys.
+- The Vercel deploy job is skipped unless all three Vercel secrets are set.
+- The Railway deploy job is skipped unless `RAILWAY_TOKEN` and `RAILWAY_SERVICE` are set.
+
+### Avoid duplicate deploys
+
+- If you use this GitHub Actions setup for Vercel, disable Vercel's automatic Git-based production deploys for the same branch.
+- If Railway is already auto-deploying from GitHub, disable that integration or remove the Railway deploy job here.
+
 ## Known constraints
 
 - Google Meet DOM selectors change. The Playwright bot is intentionally structured for maintenance, but you should expect to update selectors over time.
