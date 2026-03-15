@@ -1,0 +1,58 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum MeetingStatus {
+  QUEUED
+  CLAIMED
+  JOINING
+  LIVE
+  PROCESSING
+  COMPLETED
+  FAILED
+  KICKED
+  ENDED_EMPTY
+  ENDED_ROOM_CLOSED
+}
+
+enum MeetingEndReason {
+  HOST_NEVER_ADMITTED
+  BOT_KICKED
+  ROOM_ENDED
+  LAST_PARTICIPANT_LEFT
+  JOIN_TIMEOUT
+  UNKNOWN
+}
+
+model MeetingJob {
+  id               String           @id @default(cuid())
+  title            String?
+  meetUrl          String
+  meetCode         String
+  status           MeetingStatus    @default(QUEUED)
+  endReason        MeetingEndReason?
+  workerId         String?
+  errorMessage     String?          @db.Text
+  joinedAt         DateTime?
+  startedAt        DateTime?
+  endedAt          DateTime?
+  recordingUrl     String?
+  recordingKey     String?
+  transcriptText   String?          @db.Text
+  transcriptJson   Json?
+  aiSummary        String?          @db.Text
+  participantsPeak Int?
+  captionsEnabled  Boolean          @default(false)
+  lastHeartbeatAt  DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([status, createdAt])
+  @@index([meetCode, status])
+}
+

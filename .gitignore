@@ -1,0 +1,14 @@
+node_modules
+.next
+.vercel
+coverage
+dist
+*.log
+*.tsbuildinfo
+.env
+.env.local
+prisma/dev.db
+prisma/dev.db-journal
+worker/.auth
+worker/output
+playwright-report
