@@ -67,7 +67,8 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 | `OLLAMA_HOST` | Optional | Web + worker | Local Ollama host for a better self-hosted summary model |
 | `OLLAMA_MODEL` | Optional | Web + worker | Ollama model name to use for summaries |
 | `BLOB_READ_WRITE_TOKEN` | For hosted recordings | Web + worker | Upload recordings to Vercel Blob |
-| `GOOGLE_MEET_STORAGE_STATE_PATH` | Yes for reliable joins | Worker | Logged-in Google session used by Playwright |
+| `GOOGLE_MEET_STORAGE_STATE_PATH` | Optional | Worker | Path to a saved Playwright Google session file |
+| `GOOGLE_MEET_STORAGE_STATE_BASE64` | Recommended for Railway | Worker | Base64-encoded contents of the saved Playwright Google session |
 | `WORKER_POLL_INTERVAL_MS` | No | Worker | Queue polling interval |
 | `SOLO_GRACE_PERIOD_MS` | No | Worker | How long to stay after the bot is alone |
 | `JOIN_TIMEOUT_MS` | No | Worker | Admission timeout before failure |
@@ -94,10 +95,10 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 1. Create a new Railway service from this GitHub repo.
 2. Set the service to build with the included `railway.json`, which points Railway at `worker/Dockerfile`.
 3. Add the worker environment variables from the table above.
-4. Mount or bake in the auth state file referenced by `GOOGLE_MEET_STORAGE_STATE_PATH`.
+4. Set `GOOGLE_MEET_STORAGE_STATE_BASE64` to the base64-encoded contents of your saved Playwright auth file.
 5. Keep `PLAYWRIGHT_HEADLESS=false` because the recorder captures the virtual display.
 6. The Docker image already builds `whisper.cpp` and downloads the `tiny.en` model for free local transcription.
-7. Use `WORKER_PORT=8080` so Railway can probe `GET /healthz`.
+7. Railway injects `PORT` automatically; the worker now respects that and only needs `WORKER_PORT` if you run it somewhere else manually.
 
 ### Other worker hosts
 
@@ -139,6 +140,16 @@ The repo now includes CI in `.github/workflows/ci.yml` and production deploy aut
 - Set `DATABASE_URL` to the exact Prisma connection string TiDB Cloud gives you in its Connect dialog.
 - This repo now uses Prisma's `mysql` datasource because TiDB is MySQL-compatible at the Prisma layer.
 - For public TiDB Cloud endpoints, TiDB's docs require TLS parameters in the connection string. Do not guess them; copy the Prisma connection string TiDB generates for your cluster.
+
+## Google Auth Export
+
+After you run `npm run worker:auth`, the default saved auth file is `worker/.auth/google-user.json`.
+
+To convert it into the Railway-friendly `GOOGLE_MEET_STORAGE_STATE_BASE64` value on Windows PowerShell:
+
+```powershell
+[Convert]::ToBase64String([IO.File]::ReadAllBytes("worker/.auth/google-user.json"))
+```
 
 ## Known constraints
 

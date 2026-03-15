@@ -9,7 +9,7 @@ import { logger } from "./utils/logger";
 
 const WORKER_ID = process.env.WORKER_ID ?? `meet-worker-${randomUUID()}`;
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
-const WORKER_PORT = Number(process.env.WORKER_PORT ?? 0);
+const WORKER_PORT = Number(process.env.PORT ?? process.env.WORKER_PORT ?? 0);
 
 let shuttingDown = false;
 

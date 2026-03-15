@@ -33,10 +33,10 @@ async function main() {
   await browser.close();
 
   console.log(`Saved auth state to ${storageStatePath}`);
+  console.log("For Railway, convert that file to base64 and store it in GOOGLE_MEET_STORAGE_STATE_BASE64.");
 }
 
 main().catch((error) => {
   console.error(error);
   process.exit(1);
 });
-

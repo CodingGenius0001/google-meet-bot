@@ -4,7 +4,13 @@ import { spawn, type ChildProcess } from "node:child_process";
 import path from "node:path";
 
 import { MeetingEndReason, MeetingStatus } from "@prisma/client";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright";
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type BrowserContextOptions,
+  type Page
+} from "playwright";
 
 import { logger } from "../utils/logger";
 
@@ -80,12 +86,11 @@ export class GoogleMeetBot {
   }
 
   private async launch() {
-    const authStatePath = process.env.GOOGLE_MEET_STORAGE_STATE_PATH;
-    const hasAuthState = authStatePath ? await fileExists(authStatePath) : false;
+    const storageState = await resolveStorageState();
 
-    if (!hasAuthState) {
+    if (!storageState) {
       logger.warn(
-        "No Google auth state file was found. The bot can still open Meet, but joining a real call usually requires a logged-in account."
+        "No Google auth state was found. The bot can still open Meet, but joining a real call usually requires a logged-in account."
       );
     }
 
@@ -102,7 +107,7 @@ export class GoogleMeetBot {
     this.context = await this.browser.newContext({
       permissions: ["microphone", "camera", "notifications"],
       viewport: { width: 1440, height: 960 },
-      storageState: hasAuthState && authStatePath ? authStatePath : undefined
+      storageState
     });
 
     this.page = await this.context.newPage();
@@ -505,4 +510,25 @@ async function fileExists(filePath: string) {
   } catch {
     return false;
   }
+}
+
+async function resolveStorageState(): Promise<BrowserContextOptions["storageState"] | undefined> {
+  const encoded = process.env.GOOGLE_MEET_STORAGE_STATE_BASE64?.trim();
+
+  if (encoded) {
+    try {
+      const json = Buffer.from(encoded, "base64").toString("utf8");
+      return JSON.parse(json) as NonNullable<BrowserContextOptions["storageState"]>;
+    } catch (error) {
+      logger.warn("Unable to parse GOOGLE_MEET_STORAGE_STATE_BASE64.", error);
+    }
+  }
+
+  const authStatePath = process.env.GOOGLE_MEET_STORAGE_STATE_PATH;
+
+  if (authStatePath && (await fileExists(authStatePath))) {
+    return authStatePath;
+  }
+
+  return undefined;
 }
