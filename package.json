@@ -1,13 +1,18 @@
 {
   "name": "google-meet-bot",
   "private": true,
+  "engines": {
+    "node": "22.x"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
+    "db:deploy": "prisma migrate deploy",
     "worker:dev": "tsx worker/src/index.ts",
+    "worker:start": "tsx worker/src/index.ts",
     "worker:auth": "tsx worker/src/save-auth-state.ts",
     "postinstall": "prisma generate"
   },

@@ -1,0 +1,13 @@
+.git
+.github
+.next
+.vercel
+node_modules
+npm-debug.log*
+worker/.auth
+worker/output
+.env
+.env.local
+coverage
+dist
+

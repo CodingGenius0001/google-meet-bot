@@ -4,6 +4,7 @@ import { summarizeTranscript } from "../../../lib/ai";
 import { prisma } from "../../../lib/prisma";
 import { uploadRecordingArtifact } from "../../../lib/storage";
 import { GoogleMeetBot } from "../bot/google-meet-bot";
+import { transcribeRecording } from "./recording-transcription";
 import { logger } from "../utils/logger";
 
 function normalizeTranscriptText(raw: string | null) {
@@ -52,6 +53,11 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
 
     let recordingUrl: string | null = null;
     let recordingKey: string | null = null;
+    let transcriptionFromRecording: string | null = null;
+
+    if (result.recordingPath) {
+      transcriptionFromRecording = await transcribeRecording(result.recordingPath);
+    }
 
     if (result.recordingPath) {
       try {
@@ -64,7 +70,9 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
     }
 
     let aiSummary: string | null = null;
-    const transcriptText = normalizeTranscriptText(result.transcriptText);
+    const transcriptText = normalizeTranscriptText(
+      transcriptionFromRecording ?? result.transcriptText
+    );
 
     if (transcriptText) {
       try {
@@ -84,7 +92,10 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
         captionsEnabled: result.captionsEnabled,
         participantsPeak: result.participantsPeak,
         transcriptText,
-        transcriptJson: result.transcriptSegments as Prisma.InputJsonValue,
+        transcriptJson:
+          result.transcriptSegments.length > 0
+            ? (result.transcriptSegments as Prisma.InputJsonValue)
+            : Prisma.JsonNull,
         aiSummary,
         recordingUrl,
         recordingKey,

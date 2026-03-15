@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { createServer } from "node:http";
 
 import { MeetingStatus, type MeetingJob } from "@prisma/client";
 
@@ -8,6 +9,7 @@ import { logger } from "./utils/logger";
 
 const WORKER_ID = process.env.WORKER_ID ?? `meet-worker-${randomUUID()}`;
 const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
+const WORKER_PORT = Number(process.env.WORKER_PORT ?? 0);
 
 let shuttingDown = false;
 
@@ -55,6 +57,7 @@ async function sleep(durationMs: number) {
 }
 
 async function main() {
+  const healthServer = startHealthServer();
   logger.info("Meet bot worker started.", { workerId: WORKER_ID });
 
   while (!shuttingDown) {
@@ -69,6 +72,13 @@ async function main() {
     await processMeetingJob(job, WORKER_ID);
   }
 
+  await new Promise<void>((resolve) => {
+    healthServer?.close(() => resolve());
+
+    if (!healthServer) {
+      resolve();
+    }
+  });
   await prisma.$disconnect();
 }
 
@@ -85,3 +95,34 @@ main().catch(async (error) => {
   await prisma.$disconnect();
   process.exit(1);
 });
+
+function startHealthServer() {
+  if (!WORKER_PORT) {
+    return null;
+  }
+
+  const server = createServer((request, response) => {
+    if (request.url !== "/healthz") {
+      response.writeHead(404, { "Content-Type": "application/json" });
+      response.end(JSON.stringify({ ok: false }));
+      return;
+    }
+
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end(
+      JSON.stringify({
+        ok: true,
+        service: "worker",
+        workerId: WORKER_ID,
+        shuttingDown,
+        timestamp: new Date().toISOString()
+      })
+    );
+  });
+
+  server.listen(WORKER_PORT, () => {
+    logger.info("Worker health server listening.", { port: WORKER_PORT });
+  });
+
+  return server;
+}
