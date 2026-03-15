@@ -40,6 +40,7 @@ type BotOptions = {
 
 const JOIN_TIMEOUT_MS = Number(process.env.JOIN_TIMEOUT_MS ?? 180000);
 const SOLO_GRACE_PERIOD_MS = Number(process.env.SOLO_GRACE_PERIOD_MS ?? 60000);
+const DEFAULT_GUEST_NAME = process.env.GOOGLE_MEET_GUEST_NAME?.trim() || "MeetMate Bot";
 
 export class GoogleMeetBot {
   private readonly transcriptSegments: TranscriptSegment[] = [];
@@ -58,6 +59,7 @@ export class GoogleMeetBot {
     await this.openMeeting();
     await this.dismissPopups();
     await this.disableMediaInputs();
+    await this.fillGuestNameIfNeeded();
     await this.joinMeeting();
     await this.waitUntilAdmitted();
 
@@ -90,7 +92,7 @@ export class GoogleMeetBot {
 
     if (!storageState) {
       logger.warn(
-        "No Google auth state was found. The bot can still open Meet, but joining a real call usually requires a logged-in account."
+        "No Google auth state was found. The bot will try to join as a guest if the meeting allows guests or admits join requests."
       );
     }
 
@@ -263,10 +265,37 @@ export class GoogleMeetBot {
     const joinButton = page.getByRole("button", { name: /join now|ask to join/i }).first();
 
     if (!(await joinButton.isVisible().catch(() => false))) {
-      throw new Error("No Google Meet join button was visible. The page may require a different auth state.");
+      throw new Error(
+        "No Google Meet join button was visible. The page may require guest access to be enabled or a signed-in Google session."
+      );
     }
 
     await joinButton.click();
+  }
+
+  private async fillGuestNameIfNeeded() {
+    const page = this.getPage();
+    const candidates = [
+      page.getByRole("textbox", { name: /your name/i }).first(),
+      page.locator('input[aria-label*="name" i]').first(),
+      page.locator('input[placeholder*="name" i]').first(),
+      page.locator('input[type="text"]').first()
+    ];
+
+    for (const input of candidates) {
+      if (!(await input.isVisible().catch(() => false))) {
+        continue;
+      }
+
+      const currentValue = ((await input.inputValue().catch(() => "")) ?? "").trim();
+
+      if (!currentValue) {
+        await input.fill(DEFAULT_GUEST_NAME).catch(() => null);
+        await page.waitForTimeout(300);
+      }
+
+      return;
+    }
   }
 
   private async waitUntilAdmitted() {

@@ -36,7 +36,7 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
    npm run db:migrate
    ```
 
-5. Save Google auth state for the worker:
+5. Optional: save Google auth state for meetings that do not allow guest access:
 
    ```bash
    npm run worker:auth
@@ -68,7 +68,8 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 | `OLLAMA_MODEL` | Optional | Web + worker | Ollama model name to use for summaries |
 | `BLOB_READ_WRITE_TOKEN` | For hosted recordings | Web + worker | Upload recordings to Vercel Blob |
 | `GOOGLE_MEET_STORAGE_STATE_PATH` | Optional | Worker | Path to a saved Playwright Google session file |
-| `GOOGLE_MEET_STORAGE_STATE_BASE64` | Recommended for Railway | Worker | Base64-encoded contents of the saved Playwright Google session |
+| `GOOGLE_MEET_STORAGE_STATE_BASE64` | Optional | Worker | Base64-encoded contents of the saved Playwright Google session |
+| `GOOGLE_MEET_GUEST_NAME` | Recommended for hosted guest mode | Worker | Name the bot uses when joining without a Google account |
 | `WORKER_POLL_INTERVAL_MS` | No | Worker | Queue polling interval |
 | `SOLO_GRACE_PERIOD_MS` | No | Worker | How long to stay after the bot is alone |
 | `JOIN_TIMEOUT_MS` | No | Worker | Admission timeout before failure |
@@ -95,10 +96,11 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 1. Create a new Railway service from this GitHub repo.
 2. Set the service to build with the included `railway.json`, which points Railway at `worker/Dockerfile`.
 3. Add the worker environment variables from the table above.
-4. Set `GOOGLE_MEET_STORAGE_STATE_BASE64` to the base64-encoded contents of your saved Playwright auth file.
-5. Keep `PLAYWRIGHT_HEADLESS=false` because the recorder captures the virtual display.
-6. The Docker image already builds `whisper.cpp` and downloads the `tiny.en` model for free local transcription.
-7. Railway injects `PORT` automatically; the worker now respects that and only needs `WORKER_PORT` if you run it somewhere else manually.
+4. For the simplest hosted setup, leave Google auth unset and set `GOOGLE_MEET_GUEST_NAME` so the bot joins as a guest.
+5. If you need signed-in meetings later, set `GOOGLE_MEET_STORAGE_STATE_BASE64` to the base64-encoded contents of your saved Playwright auth file instead.
+6. Keep `PLAYWRIGHT_HEADLESS=false` because the recorder captures the virtual display.
+7. The Docker image already builds `whisper.cpp` and downloads the `tiny.en` model for free local transcription.
+8. Railway injects `PORT` automatically; the worker now respects that and only needs `WORKER_PORT` if you run it somewhere else manually.
 
 ### Other worker hosts
 
@@ -154,7 +156,8 @@ To convert it into the Railway-friendly `GOOGLE_MEET_STORAGE_STATE_BASE64` value
 ## Known constraints
 
 - Google Meet DOM selectors change. The Playwright bot is intentionally structured for maintenance, but you should expect to update selectors over time.
-- Automatic joining with a consumer Google account is brittle and may hit anti-automation checks.
+- Google may block automated Google-account sign-ins, so hosted guest-mode joining is the simplest path.
+- Guest-mode joining only works when the meeting allows guests or allows them to ask to join and be admitted.
 - Live captions are still best-effort. The worker now prefers post-call transcription from the saved recording when `whisper.cpp` is available.
 - Very long recordings are chunked into audio segments before transcription.
 - The default free summary is extractive, not a large hosted model. If you want a stronger local summary, point the app at a self-hosted Ollama instance.
