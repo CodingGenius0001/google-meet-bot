@@ -17,6 +17,7 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
     jobId: job.id,
     meetUrl: job.meetUrl
   });
+  let botCleanedUp = false;
 
   const heartbeat = setInterval(() => {
     prisma.meetingJob
@@ -42,6 +43,8 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
     });
 
     const result = await bot.run();
+    await bot.cleanup();
+    botCleanedUp = true;
 
     await prisma.meetingJob.update({
       where: { id: job.id },
@@ -78,7 +81,7 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
       try {
         aiSummary = await summarizeTranscript(transcriptText);
       } catch (error) {
-        logger.warn("AI summary generation failed.", error);
+        logger.warn("Automatic summary generation failed.", error);
       }
     }
 
@@ -125,6 +128,8 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
     logger.error("Meeting job failed.", { jobId: job.id, message });
   } finally {
     clearInterval(heartbeat);
-    await bot.cleanup();
+    if (!botCleanedUp) {
+      await bot.cleanup();
+    }
   }
 }

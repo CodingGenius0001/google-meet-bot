@@ -1,11 +1,23 @@
+import { constants } from "node:fs";
 import { spawn } from "node:child_process";
-import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
+import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
 import { logger } from "../utils/logger";
 
 const TRANSCRIPTION_SEGMENT_SECONDS = Number(process.env.TRANSCRIPTION_SEGMENT_SECONDS ?? 900);
+const DEFAULT_WHISPER_BINARY = "/opt/whisper.cpp/build/bin/whisper-cli";
+const DEFAULT_WHISPER_MODEL = "/opt/whisper.cpp/models/ggml-tiny.en.bin";
+
+async function fileExists(filePath: string) {
+  try {
+    await access(filePath, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function runCommand(command: string, args: string[]) {
   await new Promise<void>((resolve, reject) => {
@@ -33,7 +45,7 @@ async function runCommand(command: string, args: string[]) {
 
 async function buildAudioChunks(recordingPath: string) {
   const directory = await mkdtemp(path.join(tmpdir(), "meetmate-transcription-"));
-  const outputPattern = path.join(directory, "chunk-%03d.mp3");
+  const outputPattern = path.join(directory, "chunk-%03d.wav");
 
   await runCommand("ffmpeg", [
     "-y",
@@ -44,8 +56,8 @@ async function buildAudioChunks(recordingPath: string) {
     "1",
     "-ar",
     "16000",
-    "-b:a",
-    "32k",
+    "-c:a",
+    "pcm_s16le",
     "-f",
     "segment",
     "-segment_time",
@@ -54,7 +66,7 @@ async function buildAudioChunks(recordingPath: string) {
   ]);
 
   const chunkPaths = (await readdir(directory))
-    .filter((name) => name.endsWith(".mp3"))
+    .filter((name) => name.endsWith(".wav"))
     .sort()
     .map((name) => path.join(directory, name));
 
@@ -65,46 +77,39 @@ async function buildAudioChunks(recordingPath: string) {
 }
 
 async function transcribeAudioChunk(chunkPath: string) {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const whisperBinary = process.env.WHISPER_CPP_BINARY ?? DEFAULT_WHISPER_BINARY;
+  const whisperModel = process.env.WHISPER_MODEL_PATH ?? DEFAULT_WHISPER_MODEL;
+  const whisperLanguage = process.env.WHISPER_LANGUAGE?.trim() || "en";
+  const whisperThreads = process.env.WHISPER_THREADS?.trim() || "4";
+  const outputBase = chunkPath.replace(/\.wav$/i, "");
 
-  if (!apiKey) {
-    return null;
-  }
+  await runCommand(whisperBinary, [
+    "-m",
+    whisperModel,
+    "-f",
+    chunkPath,
+    "-l",
+    whisperLanguage,
+    "-t",
+    whisperThreads,
+    "--output-txt",
+    "--output-file",
+    outputBase
+  ]);
 
-  const model = process.env.OPENAI_TRANSCRIPTION_MODEL ?? "gpt-4o-mini-transcribe";
-  const language = process.env.OPENAI_TRANSCRIPTION_LANGUAGE?.trim();
-  const fileBuffer = await readFile(chunkPath);
-  const form = new FormData();
-
-  form.set("file", new Blob([fileBuffer], { type: "audio/mpeg" }), path.basename(chunkPath));
-  form.set("model", model);
-  form.set("response_format", "text");
-
-  if (language) {
-    form.set("language", language);
-  }
-
-  const response = await fetch("https://api.openai.com/v1/audio/transcriptions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`
-    },
-    body: form
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `OpenAI transcription request failed: ${response.status} ${errorText}`
-    );
-  }
-
-  const text = (await response.text()).trim();
+  const text = (await readFile(`${outputBase}.txt`, "utf8")).trim();
   return text || null;
 }
 
 export async function transcribeRecording(recordingPath: string) {
-  if (!process.env.OPENAI_API_KEY) {
+  const whisperBinary = process.env.WHISPER_CPP_BINARY ?? DEFAULT_WHISPER_BINARY;
+  const whisperModel = process.env.WHISPER_MODEL_PATH ?? DEFAULT_WHISPER_MODEL;
+
+  if (!(await fileExists(whisperBinary)) || !(await fileExists(whisperModel))) {
+    logger.warn("Whisper.cpp is not available. Falling back to caption-only transcripts.", {
+      whisperBinary,
+      whisperModel
+    });
     return null;
   }
 
@@ -116,7 +121,7 @@ export async function transcribeRecording(recordingPath: string) {
     | null = null;
 
   try {
-    logger.info("Preparing recording for transcription.", { recordingPath });
+    logger.info("Preparing recording for local transcription.", { recordingPath });
     artifacts = await buildAudioChunks(recordingPath);
 
     if (!artifacts.chunkPaths.length) {
@@ -127,7 +132,7 @@ export async function transcribeRecording(recordingPath: string) {
     const transcriptParts: string[] = [];
 
     for (const chunkPath of artifacts.chunkPaths) {
-      logger.info("Transcribing audio chunk.", { chunkPath });
+      logger.info("Transcribing audio chunk with whisper.cpp.", { chunkPath });
       const text = await transcribeAudioChunk(chunkPath);
 
       if (text) {
@@ -138,7 +143,7 @@ export async function transcribeRecording(recordingPath: string) {
     const transcriptText = transcriptParts.join("\n\n").trim();
     return transcriptText || null;
   } catch (error) {
-    logger.warn("Recording transcription failed.", error);
+    logger.warn("Local recording transcription failed.", error);
     return null;
   } finally {
     if (artifacts) {

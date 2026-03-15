@@ -12,9 +12,9 @@ MeetMate is a starter for a Google Meet note-taking bot with a Vercel-hosted das
   - the bot gets removed.
 - Captures best-effort live captions for transcript snippets.
 - Records the session inside the Linux worker container.
-- Extracts audio from the recording and sends it to OpenAI transcription models.
+- Extracts audio from the recording and transcribes it locally with `whisper.cpp`.
 - Uploads recordings to Vercel Blob when configured.
-- Generates an AI summary from the transcript with the OpenAI Responses API.
+- Generates a free automatic summary from the transcript, with optional Ollama support if you want a self-hosted LLM later.
 
 ## Architecture
 
@@ -64,16 +64,18 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 | Variable | Required | Used by | Purpose |
 | --- | --- | --- | --- |
 | `DATABASE_URL` | Yes | Web + worker | Shared Postgres database for meeting jobs |
-| `OPENAI_API_KEY` | For transcripts/summaries | Web + worker | Enables transcription and summary generation |
-| `OPENAI_MODEL` | No | Web + worker | Summary model, defaults to `gpt-4.1-mini` |
-| `OPENAI_TRANSCRIPTION_MODEL` | No | Worker | Recording transcription model, defaults to `gpt-4o-mini-transcribe` |
-| `OPENAI_TRANSCRIPTION_LANGUAGE` | No | Worker | Hint language for transcription |
+| `OLLAMA_HOST` | Optional | Web + worker | Local Ollama host for a better self-hosted summary model |
+| `OLLAMA_MODEL` | Optional | Web + worker | Ollama model name to use for summaries |
 | `BLOB_READ_WRITE_TOKEN` | For hosted recordings | Web + worker | Upload recordings to Vercel Blob |
 | `GOOGLE_MEET_STORAGE_STATE_PATH` | Yes for reliable joins | Worker | Logged-in Google session used by Playwright |
 | `WORKER_POLL_INTERVAL_MS` | No | Worker | Queue polling interval |
 | `SOLO_GRACE_PERIOD_MS` | No | Worker | How long to stay after the bot is alone |
 | `JOIN_TIMEOUT_MS` | No | Worker | Admission timeout before failure |
-| `TRANSCRIPTION_SEGMENT_SECONDS` | No | Worker | Audio chunk size before sending to OpenAI |
+| `TRANSCRIPTION_SEGMENT_SECONDS` | No | Worker | Audio chunk size before feeding `whisper.cpp` |
+| `WHISPER_CPP_BINARY` | No | Worker | Path to the `whisper.cpp` CLI binary |
+| `WHISPER_MODEL_PATH` | No | Worker | Path to the local Whisper model file |
+| `WHISPER_LANGUAGE` | No | Worker | Language hint passed to `whisper.cpp` |
+| `WHISPER_THREADS` | No | Worker | CPU thread count for local transcription |
 | `WORKER_PORT` | No | Worker | Enables `/healthz` for worker deployment platforms |
 | `DISPLAY` | No | Worker | X virtual display name |
 | `PULSE_SOURCE` | No | Worker | Audio input source for FFmpeg |
@@ -94,13 +96,15 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 3. Add the worker environment variables from the table above.
 4. Mount or bake in the auth state file referenced by `GOOGLE_MEET_STORAGE_STATE_PATH`.
 5. Keep `PLAYWRIGHT_HEADLESS=false` because the recorder captures the virtual display.
-6. Use `WORKER_PORT=8080` so Railway can probe `GET /healthz`.
+6. The Docker image already builds `whisper.cpp` and downloads the `tiny.en` model for free local transcription.
+7. Use `WORKER_PORT=8080` so Railway can probe `GET /healthz`.
 
 ### Other worker hosts
 
 - Build from `worker/Dockerfile`.
 - The container starts through `worker/start-worker.sh`, which brings up Xvfb, PulseAudio, and the worker loop.
 - Expose `WORKER_PORT` if your platform expects an HTTP health check.
+- The container also includes `whisper.cpp`, so you do not need an external transcription API.
 
 ## GitHub Actions
 
@@ -134,6 +138,7 @@ The repo now includes CI in `.github/workflows/ci.yml` and production deploy aut
 
 - Google Meet DOM selectors change. The Playwright bot is intentionally structured for maintenance, but you should expect to update selectors over time.
 - Automatic joining with a consumer Google account is brittle and may hit anti-automation checks.
-- Live captions are still best-effort. The worker now prefers post-call transcription from the saved recording when OpenAI and FFmpeg are available.
+- Live captions are still best-effort. The worker now prefers post-call transcription from the saved recording when `whisper.cpp` is available.
 - Very long recordings are chunked into audio segments before transcription.
+- The default free summary is extractive, not a large hosted model. If you want a stronger local summary, point the app at a self-hosted Ollama instance.
 - Recording people in calls can trigger legal and policy requirements. Make sure your workflow and notices comply with the jurisdictions you operate in.

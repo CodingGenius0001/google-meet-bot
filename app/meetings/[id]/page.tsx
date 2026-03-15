@@ -108,7 +108,7 @@ export default async function MeetingDetailPage({ params }: PageProps) {
 
         <div className="grid">
           <div className="panel content-panel">
-            <h2 className="section-title">AI summary</h2>
+            <h2 className="section-title">Summary</h2>
             <div className="summary-box">
               {meeting.aiSummary ??
                 "Summary pending. The worker writes this after the transcript is available."}

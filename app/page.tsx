@@ -23,7 +23,7 @@ export default async function HomePage() {
           <h1>Join the room, capture the call, keep the recap.</h1>
           <p>
             Queue a Google Meet bot from the web app, let it stay for the whole session, and
-            review recordings, transcript snippets, and AI-generated summaries after the call.
+            review recordings, transcript snippets, and automatic summaries after the call.
           </p>
           <div className="hero-grid">
             <div className="metric">
@@ -35,8 +35,8 @@ export default async function HomePage() {
               <span>Leave when the room ends, empties out, or kicks the bot.</span>
             </div>
             <div className="metric">
-              <strong>AI recap</strong>
-              <span>Use captions plus summarization to preserve the meeting outcome.</span>
+              <strong>Auto recap</strong>
+              <span>Use local transcription plus summarization to preserve the meeting outcome.</span>
             </div>
           </div>
         </div>

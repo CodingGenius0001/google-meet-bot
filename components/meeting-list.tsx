@@ -41,7 +41,7 @@ export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
                 <span className="metadata-value">{meeting.recordingUrl ? "Available" : "Pending"}</span>
               </div>
               <div className="metadata">
-                <span className="metadata-label">AI summary</span>
+                <span className="metadata-label">Summary</span>
                 <span className="metadata-value">{meeting.aiSummary ? "Ready" : "Pending"}</span>
               </div>
             </div>
@@ -51,4 +51,3 @@ export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
     </div>
   );
 }
-
