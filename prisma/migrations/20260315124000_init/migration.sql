@@ -1,56 +1,45 @@
--- CreateEnum
-CREATE TYPE "MeetingStatus" AS ENUM (
-  'QUEUED',
-  'CLAIMED',
-  'JOINING',
-  'LIVE',
-  'PROCESSING',
-  'COMPLETED',
-  'FAILED',
-  'KICKED',
-  'ENDED_EMPTY',
-  'ENDED_ROOM_CLOSED'
-);
+CREATE TABLE `MeetingJob` (
+  `id` VARCHAR(191) NOT NULL,
+  `title` VARCHAR(191) NULL,
+  `meetUrl` VARCHAR(191) NOT NULL,
+  `meetCode` VARCHAR(191) NOT NULL,
+  `status` ENUM(
+    'QUEUED',
+    'CLAIMED',
+    'JOINING',
+    'LIVE',
+    'PROCESSING',
+    'COMPLETED',
+    'FAILED',
+    'KICKED',
+    'ENDED_EMPTY',
+    'ENDED_ROOM_CLOSED'
+  ) NOT NULL DEFAULT 'QUEUED',
+  `endReason` ENUM(
+    'HOST_NEVER_ADMITTED',
+    'BOT_KICKED',
+    'ROOM_ENDED',
+    'LAST_PARTICIPANT_LEFT',
+    'JOIN_TIMEOUT',
+    'UNKNOWN'
+  ) NULL,
+  `workerId` VARCHAR(191) NULL,
+  `errorMessage` TEXT NULL,
+  `joinedAt` DATETIME(3) NULL,
+  `startedAt` DATETIME(3) NULL,
+  `endedAt` DATETIME(3) NULL,
+  `recordingUrl` VARCHAR(191) NULL,
+  `recordingKey` VARCHAR(191) NULL,
+  `transcriptText` TEXT NULL,
+  `transcriptJson` JSON NULL,
+  `aiSummary` TEXT NULL,
+  `participantsPeak` INTEGER NULL,
+  `captionsEnabled` BOOLEAN NOT NULL DEFAULT false,
+  `lastHeartbeatAt` DATETIME(3) NULL,
+  `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+  `updatedAt` DATETIME(3) NOT NULL,
 
--- CreateEnum
-CREATE TYPE "MeetingEndReason" AS ENUM (
-  'HOST_NEVER_ADMITTED',
-  'BOT_KICKED',
-  'ROOM_ENDED',
-  'LAST_PARTICIPANT_LEFT',
-  'JOIN_TIMEOUT',
-  'UNKNOWN'
-);
-
--- CreateTable
-CREATE TABLE "MeetingJob" (
-  "id" TEXT NOT NULL,
-  "title" TEXT,
-  "meetUrl" TEXT NOT NULL,
-  "meetCode" TEXT NOT NULL,
-  "status" "MeetingStatus" NOT NULL DEFAULT 'QUEUED',
-  "endReason" "MeetingEndReason",
-  "workerId" TEXT,
-  "errorMessage" TEXT,
-  "joinedAt" TIMESTAMP(3),
-  "startedAt" TIMESTAMP(3),
-  "endedAt" TIMESTAMP(3),
-  "recordingUrl" TEXT,
-  "recordingKey" TEXT,
-  "transcriptText" TEXT,
-  "transcriptJson" JSONB,
-  "aiSummary" TEXT,
-  "participantsPeak" INTEGER,
-  "captionsEnabled" BOOLEAN NOT NULL DEFAULT false,
-  "lastHeartbeatAt" TIMESTAMP(3),
-  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  "updatedAt" TIMESTAMP(3) NOT NULL,
-
-  CONSTRAINT "MeetingJob_pkey" PRIMARY KEY ("id")
-);
-
--- CreateIndex
-CREATE INDEX "MeetingJob_status_createdAt_idx" ON "MeetingJob"("status", "createdAt");
-
--- CreateIndex
-CREATE INDEX "MeetingJob_meetCode_status_idx" ON "MeetingJob"("meetCode", "status");
+  PRIMARY KEY (`id`),
+  INDEX `MeetingJob_status_createdAt_idx`(`status`, `createdAt`),
+  INDEX `MeetingJob_meetCode_status_idx`(`meetCode`, `status`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

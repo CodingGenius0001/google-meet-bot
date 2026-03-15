@@ -5,7 +5,7 @@ MeetMate is a starter for a Google Meet note-taking bot with a Vercel-hosted das
 ## What this repo does
 
 - Accepts a Google Meet link from a web dashboard.
-- Stores meeting jobs in Postgres through Prisma.
+- Stores meeting jobs in TiDB through Prisma's MySQL connector.
 - Runs a long-lived Playwright worker that claims queued jobs, joins the meeting, and stays until:
   - the call ends,
   - everyone else leaves, or
@@ -27,7 +27,7 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 ## Local setup
 
 1. Copy `.env.example` to `.env`.
-2. Point `DATABASE_URL` at a Postgres database.
+2. Point `DATABASE_URL` at a TiDB database.
 3. Install dependencies with `npm install`.
 4. Generate the Prisma client and apply migrations:
 
@@ -63,7 +63,7 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 
 | Variable | Required | Used by | Purpose |
 | --- | --- | --- | --- |
-| `DATABASE_URL` | Yes | Web + worker | Shared Postgres database for meeting jobs |
+| `DATABASE_URL` | Yes | Web + worker | Shared TiDB database for meeting jobs |
 | `OLLAMA_HOST` | Optional | Web + worker | Local Ollama host for a better self-hosted summary model |
 | `OLLAMA_MODEL` | Optional | Web + worker | Ollama model name to use for summaries |
 | `BLOB_READ_WRITE_TOKEN` | For hosted recordings | Web + worker | Upload recordings to Vercel Blob |
@@ -86,7 +86,7 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 
 - Deploy the root app to Vercel.
 - Add the shared environment variables from the table above.
-- Use a managed Postgres database like Neon, Supabase, or Vercel Postgres.
+- Use a TiDB Cloud database and paste its Prisma/MySQL connection string into `DATABASE_URL`.
 - `vercel.json` is included so Vercel builds the Next.js app from the repo root.
 
 ### Railway worker
@@ -133,6 +133,12 @@ The repo now includes CI in `.github/workflows/ci.yml` and production deploy aut
 
 - If you use this GitHub Actions setup for Vercel, disable Vercel's automatic Git-based production deploys for the same branch.
 - If Railway is already auto-deploying from GitHub, disable that integration or remove the Railway deploy job here.
+
+## TiDB Notes
+
+- Set `DATABASE_URL` to the exact Prisma connection string TiDB Cloud gives you in its Connect dialog.
+- This repo now uses Prisma's `mysql` datasource because TiDB is MySQL-compatible at the Prisma layer.
+- For public TiDB Cloud endpoints, TiDB's docs require TLS parameters in the connection string. Do not guess them; copy the Prisma connection string TiDB generates for your cluster.
 
 ## Known constraints
 

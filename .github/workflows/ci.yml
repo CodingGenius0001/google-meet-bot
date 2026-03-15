@@ -15,7 +15,7 @@ jobs:
     timeout-minutes: 20
     env:
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: "1"
-      DATABASE_URL: "postgresql://postgres:postgres@localhost:5432/meetbot?schema=public"
+      DATABASE_URL: "mysql://root:password@127.0.0.1:4000/meetbot"
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -37,4 +37,3 @@ jobs:
 
       - name: Type-check repository
         run: npx tsc --noEmit
-
