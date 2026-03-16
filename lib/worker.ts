@@ -5,6 +5,18 @@ type SummonWorkerResult = {
   error?: string;
 };
 
+const DEFAULT_SUMMON_TIMEOUT_MS = 15_000;
+
+function resolveSummonTimeoutMs() {
+  const configured = Number(process.env.WORKER_SUMMON_TIMEOUT_MS ?? "");
+
+  if (!Number.isFinite(configured) || configured <= 0) {
+    return DEFAULT_SUMMON_TIMEOUT_MS;
+  }
+
+  return Math.floor(configured);
+}
+
 function resolveSummonUrl() {
   const configured = process.env.WORKER_SUMMON_URL?.trim();
 
@@ -27,6 +39,7 @@ export async function summonWorker(): Promise<SummonWorkerResult> {
   }
 
   const token = process.env.WORKER_SUMMON_TOKEN?.trim();
+  const timeoutMs = resolveSummonTimeoutMs();
 
   try {
     const response = await fetch(summonUrl, {
@@ -37,7 +50,7 @@ export async function summonWorker(): Promise<SummonWorkerResult> {
           }
         : undefined,
       cache: "no-store",
-      signal: AbortSignal.timeout(15000)
+      signal: AbortSignal.timeout(timeoutMs)
     });
 
     if (!response.ok) {

@@ -5,6 +5,8 @@ import { prisma } from "@/lib/prisma";
 import { ensureString, normalizeMeetUrl } from "@/lib/validators";
 import { summonWorker } from "@/lib/worker";
 
+export const maxDuration = 120;
+
 export async function GET() {
   const meetings = await prisma.meetingJob.findMany({
     orderBy: {
