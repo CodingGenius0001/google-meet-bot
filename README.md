@@ -89,6 +89,7 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 - Deploy the root app to Vercel.
 - Add the shared environment variables from the table above.
 - Use a TiDB Cloud database and paste its Prisma/MySQL connection string into `DATABASE_URL`.
+- The included `vercel.json` runs `prisma migrate deploy` before `next build`, so the initial schema can be created during Vercel deployment without a local setup step.
 - `vercel.json` is included so Vercel builds the Next.js app from the repo root.
 
 ### Railway worker
