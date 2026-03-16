@@ -4,6 +4,7 @@ WORKDIR /app
 
 ENV PRISMA_SKIP_POSTINSTALL_GENERATE=true
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma
@@ -18,17 +19,23 @@ RUN cmake -S /opt/whisper.cpp -B /opt/whisper.cpp/build
 RUN cmake --build /opt/whisper.cpp/build --config Release -j
 RUN bash /opt/whisper.cpp/models/download-ggml-model.sh tiny.en
 RUN npx prisma generate
-RUN npx playwright install --with-deps chromium
+RUN mkdir -p /ms-playwright /tmp/runtime-node
+RUN npx playwright install chromium
 RUN chmod +x worker/start-worker.sh worker/scripts/start-recording.sh
+RUN chown -R node:node /app /ms-playwright /tmp/runtime-node
 
 ENV NODE_ENV=production
+ENV HOME=/home/node
 ENV DISPLAY=:99
+ENV XDG_RUNTIME_DIR=/tmp/runtime-node
 ENV PLAYWRIGHT_HEADLESS=false
 ENV WORKER_PORT=8080
 ENV WHISPER_CPP_BINARY=/opt/whisper.cpp/build/bin/whisper-cli
 ENV WHISPER_MODEL_PATH=/opt/whisper.cpp/models/ggml-tiny.en.bin
 ENV WHISPER_LANGUAGE=en
 ENV WHISPER_THREADS=4
+
+USER node
 
 EXPOSE 8080
 

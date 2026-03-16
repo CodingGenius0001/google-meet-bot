@@ -89,6 +89,13 @@ export class GoogleMeetBot {
 
   private async launch() {
     const storageState = await resolveStorageState();
+    const browserArgs = [
+      "--autoplay-policy=no-user-gesture-required",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-dev-shm-usage",
+      "--use-fake-ui-for-media-stream",
+      "--window-size=1440,960"
+    ];
 
     if (!storageState) {
       logger.warn(
@@ -96,14 +103,18 @@ export class GoogleMeetBot {
       );
     }
 
+    if (
+      process.platform === "linux" &&
+      typeof process.getuid === "function" &&
+      process.getuid() === 0
+    ) {
+      browserArgs.push("--no-sandbox", "--disable-setuid-sandbox");
+      logger.warn("Chromium is running as root. Sandbox protections are disabled for compatibility.");
+    }
+
     this.browser = await chromium.launch({
       headless: process.env.PLAYWRIGHT_HEADLESS === "true",
-      args: [
-        "--autoplay-policy=no-user-gesture-required",
-        "--disable-blink-features=AutomationControlled",
-        "--use-fake-ui-for-media-stream",
-        "--window-size=1440,960"
-      ]
+      args: browserArgs
     });
 
     this.context = await this.browser.newContext({
@@ -326,6 +337,11 @@ export class GoogleMeetBot {
   private async startRecording() {
     if (process.platform !== "linux") {
       logger.warn("Recording is only enabled in the Linux worker container. Skipping local capture.");
+      return null;
+    }
+
+    if (process.env.WORKER_DISABLE_RECORDING === "true") {
+      logger.warn("Recording was disabled during worker startup. Skipping local capture.");
       return null;
     }
 
