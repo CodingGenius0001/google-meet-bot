@@ -11,6 +11,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "worker:build": "tsc -p tsconfig.worker.json",
     "worker:dev": "tsx worker/src/index.ts",
     "worker:start": "tsx worker/src/index.ts",
     "worker:auth": "tsx worker/src/save-auth-state.ts",

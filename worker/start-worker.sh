@@ -26,4 +26,4 @@ else
   echo "PulseAudio failed to start. Continuing without local recording."
 fi
 
-exec npm run worker:start
+exec node dist/worker/src/index.js

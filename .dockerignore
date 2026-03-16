@@ -2,6 +2,9 @@
 .github
 .next
 .vercel
+app
+components
+public
 node_modules
 npm-debug.log*
 worker/.auth
@@ -10,4 +13,9 @@ worker/output
 .env.local
 coverage
 dist
-
+README.md
+LICENSE
+next-env.d.ts
+next.config.mjs
+vercel.json
+railway.json
