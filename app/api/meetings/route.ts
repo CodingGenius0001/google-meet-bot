@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { findActiveMeetingByCode } from "@/lib/meetings";
 import { prisma } from "@/lib/prisma";
 import { ensureString, normalizeMeetUrl } from "@/lib/validators";
+import { summonWorker } from "@/lib/worker";
 
 export async function GET() {
   const meetings = await prisma.meetingJob.findMany({
@@ -45,7 +46,16 @@ export async function POST(request: Request) {
       }
     });
 
-    return NextResponse.json({ id: meeting.id }, { status: 201 });
+    const summon = await summonWorker();
+
+    return NextResponse.json(
+      {
+        id: meeting.id,
+        workerTriggered: summon.ok,
+        workerNotice: summon.ok ? null : summon.error
+      },
+      { status: 201 }
+    );
   } catch (error) {
     return NextResponse.json(
       {
@@ -55,4 +65,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 
 import { MeetingStatus, type MeetingJob } from "@prisma/client";
@@ -8,10 +8,13 @@ import { processMeetingJob } from "./services/meeting-runner";
 import { logger } from "./utils/logger";
 
 const WORKER_ID = process.env.WORKER_ID ?? `meet-worker-${randomUUID()}`;
-const POLL_INTERVAL_MS = Number(process.env.WORKER_POLL_INTERVAL_MS ?? 5000);
 const WORKER_PORT = Number(process.env.PORT ?? process.env.WORKER_PORT ?? 0);
+const SUMMON_TOKEN = process.env.WORKER_SUMMON_TOKEN?.trim() || null;
 
 let shuttingDown = false;
+let queueDrainRequested = false;
+let queueDrainPromise: Promise<void> | null = null;
+let activeJobId: string | null = null;
 
 async function claimNextJob(): Promise<MeetingJob | null> {
   const candidate = await prisma.meetingJob.findFirst({
@@ -50,36 +53,75 @@ async function claimNextJob(): Promise<MeetingJob | null> {
   });
 }
 
-async function sleep(durationMs: number) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, durationMs);
+async function disconnectPrisma() {
+  await prisma.$disconnect().catch((error: unknown) => {
+    logger.warn("Failed to disconnect Prisma cleanly.", error);
   });
+}
+
+async function drainQueue(source: string) {
+  logger.info("Worker queue drain started.", { source });
+
+  while (!shuttingDown && queueDrainRequested) {
+    queueDrainRequested = false;
+
+    while (!shuttingDown) {
+      const job = await claimNextJob();
+
+      if (!job) {
+        break;
+      }
+
+      activeJobId = job.id;
+      logger.info("Claimed meeting job.", { jobId: job.id, meetUrl: job.meetUrl });
+
+      try {
+        await processMeetingJob(job, WORKER_ID);
+      } finally {
+        activeJobId = null;
+      }
+    }
+  }
+
+  logger.info("Worker queue drain finished.", { source });
+}
+
+function requestQueueDrain(source: string) {
+  queueDrainRequested = true;
+
+  if (queueDrainPromise) {
+    return false;
+  }
+
+  queueDrainPromise = drainQueue(source)
+    .catch((error: unknown) => {
+      logger.error("Worker queue drain crashed.", error);
+    })
+    .finally(async () => {
+      activeJobId = null;
+      queueDrainPromise = null;
+      await disconnectPrisma();
+    });
+
+  return true;
 }
 
 async function main() {
   const healthServer = startHealthServer();
-  logger.info("Meet bot worker started.", { workerId: WORKER_ID });
-
-  while (!shuttingDown) {
-    const job = await claimNextJob();
-
-    if (!job) {
-      await sleep(POLL_INTERVAL_MS);
-      continue;
-    }
-
-    logger.info("Claimed meeting job.", { jobId: job.id, meetUrl: job.meetUrl });
-    await processMeetingJob(job, WORKER_ID);
-  }
+  logger.info("Meet bot worker started.", { workerId: WORKER_ID, port: WORKER_PORT });
 
   await new Promise<void>((resolve) => {
-    healthServer?.close(() => resolve());
-
     if (!healthServer) {
       resolve();
+      return;
     }
+
+    healthServer.on("close", () => {
+      resolve();
+    });
   });
-  await prisma.$disconnect();
+
+  await disconnectPrisma();
 }
 
 function handleShutdown(signal: string) {
@@ -92,7 +134,7 @@ process.on("SIGTERM", () => handleShutdown("SIGTERM"));
 
 main().catch(async (error) => {
   logger.error("Worker crashed.", error);
-  await prisma.$disconnect();
+  await disconnectPrisma();
   process.exit(1);
 });
 
@@ -102,22 +144,48 @@ function startHealthServer() {
   }
 
   const server = createServer((request, response) => {
-    if (request.url !== "/healthz") {
-      response.writeHead(404, { "Content-Type": "application/json" });
-      response.end(JSON.stringify({ ok: false }));
+    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
+
+    if (request.method === "GET" && url.pathname === "/healthz") {
+      response.writeHead(200, { "Content-Type": "application/json" });
+      response.end(
+        JSON.stringify({
+          ok: true,
+          service: "worker",
+          workerId: WORKER_ID,
+          shuttingDown,
+          busy: Boolean(queueDrainPromise),
+          activeJobId,
+          timestamp: new Date().toISOString()
+        })
+      );
       return;
     }
 
-    response.writeHead(200, { "Content-Type": "application/json" });
-    response.end(
-      JSON.stringify({
-        ok: true,
-        service: "worker",
-        workerId: WORKER_ID,
-        shuttingDown,
-        timestamp: new Date().toISOString()
-      })
-    );
+    if (request.method === "POST" && url.pathname === "/summon") {
+      if (!isSummonAuthorized(request.headers.authorization, request.headers["x-worker-summon-token"])) {
+        response.writeHead(401, { "Content-Type": "application/json" });
+        response.end(JSON.stringify({ ok: false, error: "Unauthorized" }));
+        return;
+      }
+
+      const started = requestQueueDrain("http");
+      response.writeHead(202, { "Content-Type": "application/json" });
+      response.end(
+        JSON.stringify({
+          ok: true,
+          workerId: WORKER_ID,
+          accepted: true,
+          started,
+          busy: Boolean(queueDrainPromise),
+          activeJobId
+        })
+      );
+      return;
+    }
+
+    response.writeHead(404, { "Content-Type": "application/json" });
+    response.end(JSON.stringify({ ok: false }));
   });
 
   server.listen(WORKER_PORT, () => {
@@ -125,4 +193,31 @@ function startHealthServer() {
   });
 
   return server;
+}
+
+function isSummonAuthorized(
+  authorizationHeader: string | undefined,
+  summonHeader: string | string[] | undefined
+) {
+  if (!SUMMON_TOKEN) {
+    return true;
+  }
+
+  const bearerToken = authorizationHeader?.match(/^Bearer\s+(.+)$/i)?.[1]?.trim();
+  const headerToken =
+    typeof summonHeader === "string" ? summonHeader.trim() : summonHeader?.[0]?.trim();
+  const candidate = bearerToken || headerToken;
+
+  if (!candidate) {
+    return false;
+  }
+
+  const expected = Buffer.from(SUMMON_TOKEN);
+  const received = Buffer.from(candidate);
+
+  if (expected.length !== received.length) {
+    return false;
+  }
+
+  return timingSafeEqual(expected, received);
 }

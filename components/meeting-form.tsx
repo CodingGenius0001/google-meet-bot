@@ -5,6 +5,8 @@ import { useState, useTransition } from "react";
 
 type CreateMeetingResponse = {
   id: string;
+  workerTriggered?: boolean;
+  workerNotice?: string | null;
 };
 
 export function MeetingForm() {
@@ -40,6 +42,11 @@ export function MeetingForm() {
         }
 
         const payload = (await response.json()) as CreateMeetingResponse;
+
+        if (payload.workerTriggered === false && payload.workerNotice) {
+          setError(payload.workerNotice);
+        }
+
         router.push(`/meetings/${payload.id}`);
         router.refresh();
       })();

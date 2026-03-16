@@ -70,7 +70,8 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 | `GOOGLE_MEET_STORAGE_STATE_PATH` | Optional | Worker | Path to a saved Playwright Google session file |
 | `GOOGLE_MEET_STORAGE_STATE_BASE64` | Optional | Worker | Base64-encoded contents of the saved Playwright Google session |
 | `GOOGLE_MEET_GUEST_NAME` | Recommended for hosted guest mode | Worker | Name the bot uses when joining without a Google account |
-| `WORKER_POLL_INTERVAL_MS` | No | Worker | Queue polling interval |
+| `WORKER_SUMMON_URL` | Recommended | Web | Public Railway worker URL that the dashboard calls to wake the worker |
+| `WORKER_SUMMON_TOKEN` | Recommended | Web + worker | Shared secret that protects the worker `/summon` endpoint |
 | `SOLO_GRACE_PERIOD_MS` | No | Worker | How long to stay after the bot is alone |
 | `JOIN_TIMEOUT_MS` | No | Worker | Admission timeout before failure |
 | `TRANSCRIPTION_SEGMENT_SECONDS` | No | Worker | Audio chunk size before feeding `whisper.cpp` |
@@ -97,11 +98,14 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 1. Create a new Railway service from this GitHub repo.
 2. Set the service to build with the included `railway.json`, which points Railway at `worker/Dockerfile`.
 3. Add the worker environment variables from the table above.
-4. For the simplest hosted setup, leave Google auth unset and set `GOOGLE_MEET_GUEST_NAME` so the bot joins as a guest.
-5. If you need signed-in meetings later, set `GOOGLE_MEET_STORAGE_STATE_BASE64` to the base64-encoded contents of your saved Playwright auth file instead.
-6. Keep `PLAYWRIGHT_HEADLESS=false` because the recorder captures the virtual display.
-7. The Docker image already builds `whisper.cpp` and downloads the `tiny.en` model for free local transcription.
-8. Railway injects `PORT` automatically; the worker now respects that and only needs `WORKER_PORT` if you run it somewhere else manually.
+4. Set `WORKER_SUMMON_URL` in Vercel to your Railway worker URL, for example `https://your-worker.up.railway.app`.
+5. Set the same `WORKER_SUMMON_TOKEN` in both Vercel and Railway so only your dashboard can wake the worker.
+6. Enable Railway `Serverless` for the worker service so it sleeps when idle and wakes on the next summon request.
+7. For the simplest hosted setup, leave Google auth unset and set `GOOGLE_MEET_GUEST_NAME` so the bot joins as a guest.
+8. If you need signed-in meetings later, set `GOOGLE_MEET_STORAGE_STATE_BASE64` to the base64-encoded contents of your saved Playwright auth file instead.
+9. Keep `PLAYWRIGHT_HEADLESS=false` because the recorder captures the virtual display.
+10. The Docker image already builds `whisper.cpp` and downloads the `tiny.en` model for free local transcription.
+11. Railway injects `PORT` automatically; the worker now respects that and only needs `WORKER_PORT` if you run it somewhere else manually.
 
 ### Other worker hosts
 
