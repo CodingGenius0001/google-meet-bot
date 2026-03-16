@@ -1,10 +1,15 @@
 import Link from "next/link";
 import type { MeetingJob } from "@prisma/client";
 
-import { formatDateTime } from "@/lib/meetings";
+import { AutoRefresh } from "@/components/auto-refresh";
+import { LocalDateTime } from "@/components/local-date-time";
 import { StatusPill } from "@/components/status-pill";
 
 export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
+  const hasActiveMeetings = meetings.some((meeting) =>
+    ["QUEUED", "CLAIMED", "JOINING", "LIVE", "PROCESSING"].includes(meeting.status)
+  );
+
   if (!meetings.length) {
     return (
       <div className="panel content-panel">
@@ -16,6 +21,7 @@ export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
 
   return (
     <div className="panel content-panel">
+      <AutoRefresh enabled={hasActiveMeetings} />
       <h2 className="section-title">Recent sessions</h2>
       <div className="meeting-list">
         {meetings.map((meeting) => (
@@ -30,11 +36,15 @@ export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
             <div className="meeting-meta">
               <div className="metadata">
                 <span className="metadata-label">Queued</span>
-                <span className="metadata-value">{formatDateTime(meeting.createdAt)}</span>
+                <span className="metadata-value">
+                  <LocalDateTime value={meeting.createdAt} />
+                </span>
               </div>
               <div className="metadata">
                 <span className="metadata-label">Ended</span>
-                <span className="metadata-value">{formatDateTime(meeting.endedAt)}</span>
+                <span className="metadata-value">
+                  <LocalDateTime value={meeting.endedAt} />
+                </span>
               </div>
               <div className="metadata">
                 <span className="metadata-label">Recording</span>

@@ -1,8 +1,11 @@
 import Link from "next/link";
+import { MeetingStatus } from "@prisma/client";
 import { notFound } from "next/navigation";
 
+import { AutoRefresh } from "@/components/auto-refresh";
+import { LocalDateTime } from "@/components/local-date-time";
 import { StatusPill } from "@/components/status-pill";
-import { formatDateTime, getMeetingJob } from "@/lib/meetings";
+import { getMeetingJob } from "@/lib/meetings";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +21,14 @@ type TranscriptSegment = {
   capturedAt: string;
 };
 
+const ACTIVE_STATUSES = new Set<MeetingStatus>([
+  MeetingStatus.QUEUED,
+  MeetingStatus.CLAIMED,
+  MeetingStatus.JOINING,
+  MeetingStatus.LIVE,
+  MeetingStatus.PROCESSING
+]);
+
 export default async function MeetingDetailPage({ params }: PageProps) {
   const { id } = await params;
   const meeting = await getMeetingJob(id);
@@ -29,9 +40,15 @@ export default async function MeetingDetailPage({ params }: PageProps) {
   const transcript = Array.isArray(meeting.transcriptJson)
     ? (meeting.transcriptJson as TranscriptSegment[])
     : [];
+  const hasTranscript = transcript.length > 0 || Boolean(meeting.transcriptText?.trim());
+  const hasSummary = Boolean(meeting.aiSummary?.trim());
+  const hasRecording = Boolean(meeting.recordingUrl);
+  const recordingUrl = meeting.recordingUrl ?? undefined;
+  const isActive = ACTIVE_STATUSES.has(meeting.status);
 
   return (
     <main className="shell">
+      <AutoRefresh enabled={isActive} />
       <div className="topbar">
         <div className="brand">
           <span className="brand-mark">M</span>
@@ -41,8 +58,23 @@ export default async function MeetingDetailPage({ params }: PageProps) {
           <Link className="ghost-button" href="/">
             Back to dashboard
           </Link>
-          {meeting.recordingUrl ? (
-            <a className="primary-button" href={meeting.recordingUrl} target="_blank" rel="noreferrer">
+          {hasTranscript ? (
+            <a className="ghost-button" href={`/api/meetings/${meeting.id}/downloads?kind=transcript`}>
+              Download transcript
+            </a>
+          ) : null}
+          {hasSummary ? (
+            <a className="ghost-button" href={`/api/meetings/${meeting.id}/downloads?kind=summary`}>
+              Download summary
+            </a>
+          ) : null}
+          {hasRecording ? (
+            <a className="ghost-button" href={`/api/meetings/${meeting.id}/downloads?kind=recording`}>
+              Download video
+            </a>
+          ) : null}
+          {hasRecording ? (
+            <a className="primary-button" href={recordingUrl} target="_blank" rel="noreferrer">
               Open recording
             </a>
           ) : null}
@@ -62,18 +94,41 @@ export default async function MeetingDetailPage({ params }: PageProps) {
         <div className="grid">
           <div className="panel content-panel">
             <h2 className="section-title">Session details</h2>
+            {isActive ? (
+              <p className="subtle">
+                This page refreshes automatically while the worker is still handling the meeting.
+              </p>
+            ) : null}
+            {meeting.status === MeetingStatus.QUEUED && !meeting.lastHeartbeatAt ? (
+              <p className="empty-state">
+                This job has not been claimed by any worker yet. If it stays queued, check that your Railway worker is deployed,
+                healthy, and using the same `DATABASE_URL` as Vercel.
+              </p>
+            ) : null}
             <div className="detail-grid">
               <div className="metadata">
                 <span className="metadata-label">Queued</span>
-                <span className="metadata-value">{formatDateTime(meeting.createdAt)}</span>
+                <span className="metadata-value">
+                  <LocalDateTime value={meeting.createdAt} />
+                </span>
+              </div>
+              <div className="metadata">
+                <span className="metadata-label">Worker heartbeat</span>
+                <span className="metadata-value">
+                  <LocalDateTime value={meeting.lastHeartbeatAt} emptyLabel="No heartbeat yet" />
+                </span>
               </div>
               <div className="metadata">
                 <span className="metadata-label">Joined</span>
-                <span className="metadata-value">{formatDateTime(meeting.joinedAt)}</span>
+                <span className="metadata-value">
+                  <LocalDateTime value={meeting.joinedAt} />
+                </span>
               </div>
               <div className="metadata">
                 <span className="metadata-label">Ended</span>
-                <span className="metadata-value">{formatDateTime(meeting.endedAt)}</span>
+                <span className="metadata-value">
+                  <LocalDateTime value={meeting.endedAt} />
+                </span>
               </div>
               <div className="metadata">
                 <span className="metadata-label">Participants peak</span>
@@ -89,7 +144,12 @@ export default async function MeetingDetailPage({ params }: PageProps) {
                 <span className="metadata-label">End reason</span>
                 <span className="metadata-value">{meeting.endReason ?? "Pending"}</span>
               </div>
+              <div className="metadata">
+                <span className="metadata-label">Worker id</span>
+                <span className="metadata-value">{meeting.workerId ?? "Not claimed yet"}</span>
+              </div>
             </div>
+            {meeting.errorMessage ? <p className="empty-state">{meeting.errorMessage}</p> : null}
           </div>
 
           <div className="panel content-panel">
@@ -122,7 +182,9 @@ export default async function MeetingDetailPage({ params }: PageProps) {
                 {transcript.map((segment, index) => (
                   <div className="transcript-line" key={`${segment.capturedAt}-${index}`}>
                     <strong>{segment.speaker || "Unknown"}</strong>
-                    <time>{new Date(segment.capturedAt).toLocaleTimeString()}</time>
+                    <time>
+                      <LocalDateTime value={segment.capturedAt} timeOnly emptyLabel="Unknown time" />
+                    </time>
                     <div>{segment.text}</div>
                   </div>
                 ))}
