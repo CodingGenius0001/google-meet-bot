@@ -70,8 +70,9 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 | `GOOGLE_MEET_STORAGE_STATE_PATH` | Optional | Worker | Path to a saved Playwright Google session file |
 | `GOOGLE_MEET_STORAGE_STATE_BASE64` | Optional | Worker | Base64-encoded contents of the saved Playwright Google session |
 | `GOOGLE_MEET_GUEST_NAME` | Recommended for hosted guest mode | Worker | Name the bot uses when joining without a Google account |
-| `WORKER_SUMMON_URL` | Recommended | Web | Public Railway worker URL that the dashboard calls to wake the worker |
-| `WORKER_SUMMON_TOKEN` | Recommended | Web + worker | Shared secret that protects the worker `/summon` endpoint |
+| `WORKER_SUMMON_URL` | Optional | Web | Public worker URL that the dashboard calls to wake a serverless worker immediately |
+| `WORKER_SUMMON_TOKEN` | Optional | Web + worker | Shared secret that protects the worker `/summon` endpoint |
+| `WORKER_POLL_INTERVAL_MS` | Optional | Worker | Poll interval for always-on VM workers like Oracle; leave `0` for summon-only serverless setups |
 | `SOLO_GRACE_PERIOD_MS` | No | Worker | How long to stay after the bot is alone |
 | `JOIN_TIMEOUT_MS` | No | Worker | Admission timeout before failure |
 | `TRANSCRIPTION_SEGMENT_SECONDS` | No | Worker | Audio chunk size before feeding `whisper.cpp` |
@@ -107,11 +108,40 @@ Vercel cannot run the browser bot itself. It can host the website and API, but t
 10. The Docker image already builds `whisper.cpp` and downloads the `tiny.en` model for free local transcription.
 11. Railway injects `PORT` automatically; the worker now respects that and only needs `WORKER_PORT` if you run it somewhere else manually.
 
+### Oracle Cloud Always Free worker
+
+1. Create an Ubuntu VM on Oracle Cloud Always Free.
+2. For this workload, prefer an Ampere A1 Flex shape so the worker has enough CPU and memory for Chromium, FFmpeg, and local transcription.
+3. SSH into the VM, clone this repo, and run:
+
+   ```bash
+   bash deploy/oracle/install-docker.sh
+   ```
+
+4. Sign out and back in once so your shell picks up the Docker group.
+5. Copy `deploy/oracle/.env.worker.example` to `deploy/oracle/.env.worker` and fill in the worker secrets.
+6. Keep `WORKER_POLL_INTERVAL_MS=15000` so the Oracle worker polls TiDB directly and does not need to be reachable from the public internet.
+7. Start or update the worker:
+
+   ```bash
+   bash deploy/oracle/run-worker.sh
+   ```
+
+8. Check local health on the VM:
+
+   ```bash
+   curl http://127.0.0.1:8080/healthz
+   ```
+
+9. Leave `WORKER_SUMMON_URL` unset in Vercel if you are using Oracle polling mode. The dashboard will still queue jobs in TiDB, and the Oracle worker will pick them up automatically on its next poll.
+10. If you later want instant wake behavior as well, expose the worker behind HTTPS and point `WORKER_SUMMON_URL` at that URL, but it is not required for Oracle.
+
 ### Other worker hosts
 
 - Build from `worker/Dockerfile`.
 - The container starts through `worker/start-worker.sh`, which brings up Xvfb, PulseAudio, and the worker loop.
 - Expose `WORKER_PORT` if your platform expects an HTTP health check.
+- Set `WORKER_POLL_INTERVAL_MS` on always-on VM hosts that should poll TiDB directly instead of waiting for `/summon`.
 - The container also includes `whisper.cpp`, so you do not need an external transcription API.
 
 ## GitHub Actions

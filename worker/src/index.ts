@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { createServer } from "node:http";
+import { createServer, type Server } from "node:http";
 
 import { MeetingStatus, type MeetingJob } from "@prisma/client";
 
@@ -10,11 +10,18 @@ import { logger } from "./utils/logger";
 const WORKER_ID = process.env.WORKER_ID ?? `meet-worker-${randomUUID()}`;
 const WORKER_PORT = Number(process.env.PORT ?? process.env.WORKER_PORT ?? 0);
 const SUMMON_TOKEN = process.env.WORKER_SUMMON_TOKEN?.trim() || null;
+const WORKER_POLL_INTERVAL_MS = Math.max(0, Number(process.env.WORKER_POLL_INTERVAL_MS ?? 0) || 0);
 
 let shuttingDown = false;
 let queueDrainRequested = false;
 let queueDrainPromise: Promise<void> | null = null;
 let activeJobId: string | null = null;
+let healthServer: Server | null = null;
+let pollTimer: NodeJS.Timeout | null = null;
+let resolveShutdown: (() => void) | null = null;
+const shutdownPromise = new Promise<void>((resolve) => {
+  resolveShutdown = resolve;
+});
 
 async function claimNextJob(): Promise<MeetingJob | null> {
   const candidate = await prisma.meetingJob.findFirst({
@@ -107,26 +114,26 @@ function requestQueueDrain(source: string) {
 }
 
 async function main() {
-  const healthServer = startHealthServer();
-  logger.info("Meet bot worker started.", { workerId: WORKER_ID, port: WORKER_PORT });
-
-  await new Promise<void>((resolve) => {
-    if (!healthServer) {
-      resolve();
-      return;
-    }
-
-    healthServer.on("close", () => {
-      resolve();
-    });
+  healthServer = startHealthServer();
+  startPoller();
+  logger.info("Meet bot worker started.", {
+    workerId: WORKER_ID,
+    port: WORKER_PORT || null,
+    pollIntervalMs: WORKER_POLL_INTERVAL_MS || null
   });
 
+  await shutdownPromise;
   await disconnectPrisma();
 }
 
 function handleShutdown(signal: string) {
+  if (shuttingDown) {
+    return;
+  }
+
   logger.info("Shutdown signal received.", { signal });
   shuttingDown = true;
+  void shutdownWorker();
 }
 
 process.on("SIGINT", () => handleShutdown("SIGINT"));
@@ -156,6 +163,7 @@ function startHealthServer() {
           shuttingDown,
           busy: Boolean(queueDrainPromise),
           activeJobId,
+          pollIntervalMs: WORKER_POLL_INTERVAL_MS || null,
           timestamp: new Date().toISOString()
         })
       );
@@ -193,6 +201,45 @@ function startHealthServer() {
   });
 
   return server;
+}
+
+function startPoller() {
+  if (!WORKER_POLL_INTERVAL_MS) {
+    return;
+  }
+
+  logger.info("Worker poller enabled.", { intervalMs: WORKER_POLL_INTERVAL_MS });
+  requestQueueDrain("startup");
+  pollTimer = setInterval(() => {
+    requestQueueDrain("poller");
+  }, WORKER_POLL_INTERVAL_MS);
+}
+
+async function shutdownWorker() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+
+  const server = healthServer;
+  healthServer = null;
+
+  if (server) {
+    await new Promise<void>((resolve) => {
+      server.close(() => {
+        resolve();
+      });
+    });
+  }
+
+  if (queueDrainPromise) {
+    await queueDrainPromise.catch(() => {
+      return;
+    });
+  }
+
+  resolveShutdown?.();
+  resolveShutdown = null;
 }
 
 function isSummonAuthorized(

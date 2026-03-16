@@ -51,8 +51,8 @@ export async function POST(request: Request) {
     return NextResponse.json(
       {
         id: meeting.id,
-        workerTriggered: summon.ok,
-        workerNotice: summon.ok ? null : summon.error
+        workerTriggered: summon.attempted ? summon.ok : undefined,
+        workerNotice: summon.attempted && !summon.ok ? summon.error : null
       },
       { status: 201 }
     );
