@@ -6,6 +6,7 @@ ENV PRISMA_SKIP_POSTINSTALL_GENERATE=true
 ENV PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 
 COPY package.json package-lock.json* ./
+COPY prisma ./prisma
 
 RUN npm ci
 RUN apt-get update && apt-get install -y ffmpeg pulseaudio xvfb git cmake build-essential curl && rm -rf /var/lib/apt/lists/*
