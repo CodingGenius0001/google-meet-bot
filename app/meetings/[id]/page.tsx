@@ -67,23 +67,35 @@ export default async function MeetingDetailPage({ params }: PageProps) {
             Back to dashboard
           </Link>
           {hasTranscript ? (
-            <a className="ghost-button" href={`/api/meetings/${meeting.id}/downloads?kind=transcript`}>
+            <a
+              className="ghost-button"
+              href={`/api/meetings/${meeting.id}/downloads?kind=transcript`}
+              download
+            >
               Download transcript
             </a>
           ) : null}
           {hasSummary ? (
-            <a className="ghost-button" href={`/api/meetings/${meeting.id}/downloads?kind=summary`}>
+            <a
+              className="ghost-button"
+              href={`/api/meetings/${meeting.id}/downloads?kind=summary`}
+              download
+            >
               Download summary
             </a>
           ) : null}
           {hasRecording ? (
-            <a className="ghost-button" href={`/api/meetings/${meeting.id}/downloads?kind=recording`}>
-              Download video
+            <a
+              className="primary-button"
+              href={`/api/meetings/${meeting.id}/downloads?kind=recording`}
+              download
+            >
+              Download recording
             </a>
           ) : null}
           {hasRecording ? (
-            <a className="primary-button" href={recordingUrl} target="_blank" rel="noreferrer">
-              Open recording
+            <a className="ghost-button" href={recordingUrl} target="_blank" rel="noreferrer">
+              Open in new tab
             </a>
           ) : null}
         </div>
@@ -165,6 +177,23 @@ export default async function MeetingDetailPage({ params }: PageProps) {
             {meeting.recordingUrl ? (
               <div className="recording">
                 <video controls preload="metadata" src={meeting.recordingUrl} />
+                <div className="recording-actions">
+                  <a
+                    className="primary-button"
+                    href={`/api/meetings/${meeting.id}/downloads?kind=recording`}
+                    download
+                  >
+                    Download recording
+                  </a>
+                  <a
+                    className="ghost-button"
+                    href={recordingUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open in new tab
+                  </a>
+                </div>
               </div>
             ) : (
               <p className="empty-state">
