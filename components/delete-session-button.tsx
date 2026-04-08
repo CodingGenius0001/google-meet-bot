@@ -13,13 +13,20 @@ type DeleteSessionButtonProps = {
   redirectTo?: string;
   /** Visual style — `primary` for the detail page, `ghost` for list cards. */
   variant?: "primary" | "ghost";
+  /**
+   * Bypass the server-side active-status guard. Used for "force delete"
+   * on sessions that are wedged in PROCESSING because the worker crashed
+   * or was replaced mid-run.
+   */
+  force?: boolean;
 };
 
 export function DeleteSessionButton({
   meetingId,
   label = "Delete session",
   redirectTo,
-  variant = "ghost"
+  variant = "ghost",
+  force = false
 }: DeleteSessionButtonProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
@@ -37,7 +44,9 @@ export function DeleteSessionButton({
     }
 
     const confirmed = window.confirm(
-      "Delete this session? The recording, transcript, and summary will be removed. This cannot be undone."
+      force
+        ? "Force delete this stuck session? Any running worker will lose ownership on its next heartbeat. This cannot be undone."
+        : "Delete this session? The recording, transcript, and summary will be removed. This cannot be undone."
     );
     if (!confirmed) {
       return;
@@ -46,7 +55,10 @@ export function DeleteSessionButton({
     setError(null);
 
     try {
-      const response = await fetch(`/api/meetings/${meetingId}`, {
+      const url = force
+        ? `/api/meetings/${meetingId}?force=1`
+        : `/api/meetings/${meetingId}`;
+      const response = await fetch(url, {
         method: "DELETE"
       });
 

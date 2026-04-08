@@ -74,11 +74,17 @@ export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
                 />
               </div>
             ) : null}
-            {!ACTIVE_STATUSES.has(meeting.status) ? (
-              <div className="meeting-card-actions">
+            <div className="meeting-card-actions">
+              {ACTIVE_STATUSES.has(meeting.status) ? (
+                <DeleteSessionButton
+                  meetingId={meeting.id}
+                  label="Force delete"
+                  force
+                />
+              ) : (
                 <DeleteSessionButton meetingId={meeting.id} />
-              </div>
-            ) : null}
+              )}
+            </div>
           </Link>
         ))}
       </div>

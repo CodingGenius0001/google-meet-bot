@@ -107,9 +107,16 @@ export default async function MeetingDetailPage({ params }: PageProps) {
               alreadyRequested={Boolean(meeting.cancelRequestedAt)}
             />
           ) : null}
-          {!isActive ? (
+          {isActive ? (
+            <DeleteSessionButton
+              meetingId={meeting.id}
+              redirectTo="/"
+              label="Force delete"
+              force
+            />
+          ) : (
             <DeleteSessionButton meetingId={meeting.id} redirectTo="/" variant="primary" />
-          ) : null}
+          )}
         </div>
       </div>
 

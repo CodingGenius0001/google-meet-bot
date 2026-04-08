@@ -49,7 +49,7 @@ export async function GET(_request: Request, { params }: RouteProps) {
   return NextResponse.json(meeting, { headers: NO_STORE_HEADERS });
 }
 
-export async function DELETE(_request: Request, { params }: RouteProps) {
+export async function DELETE(request: Request, { params }: RouteProps) {
   const session = await getDashboardSession();
   if (!session) {
     return NextResponse.json(
@@ -68,7 +68,13 @@ export async function DELETE(_request: Request, { params }: RouteProps) {
     );
   }
 
-  if (ACTIVE_STATUSES.has(meeting.status)) {
+  // `?force=1` bypasses the active-status guard so users can unstick jobs
+  // that are wedged in PROCESSING because a worker crashed or was replaced
+  // mid-run. Any running worker will lose ownership on its next heartbeat
+  // (updateMany returns count === 0) so this is safe.
+  const force = new URL(request.url).searchParams.get("force") === "1";
+
+  if (!force && ACTIVE_STATUSES.has(meeting.status)) {
     return NextResponse.json(
       {
         error:
