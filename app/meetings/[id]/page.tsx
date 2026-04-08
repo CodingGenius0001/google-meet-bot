@@ -57,6 +57,16 @@ export default async function MeetingDetailPage({ params }: PageProps) {
   const recordingUrl = meeting.recordingUrl ?? undefined;
   const isActive = ACTIVE_STATUSES.has(meeting.status);
 
+  // A session is considered "stuck" (worth offering Force delete for) if
+  // its heartbeat has gone stale. Healthy active sessions should only
+  // offer Stop, not Force delete.
+  const STALE_HEARTBEAT_MS = 90_000;
+  const isStuck = isActive
+    ? meeting.lastHeartbeatAt
+      ? Date.now() - new Date(meeting.lastHeartbeatAt).getTime() > STALE_HEARTBEAT_MS
+      : Date.now() - new Date(meeting.createdAt).getTime() > 120_000
+    : false;
+
   return (
     <main className="shell">
       <AutoRefresh enabled={isActive} />
@@ -107,16 +117,17 @@ export default async function MeetingDetailPage({ params }: PageProps) {
               alreadyRequested={Boolean(meeting.cancelRequestedAt)}
             />
           ) : null}
-          {isActive ? (
+          {isActive && isStuck ? (
             <DeleteSessionButton
               meetingId={meeting.id}
               redirectTo="/"
-              label="Force delete"
+              label="Force delete (stuck)"
               force
             />
-          ) : (
+          ) : null}
+          {!isActive ? (
             <DeleteSessionButton meetingId={meeting.id} redirectTo="/" variant="primary" />
-          )}
+          ) : null}
         </div>
       </div>
 

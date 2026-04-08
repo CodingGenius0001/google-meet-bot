@@ -15,6 +15,21 @@ const ACTIVE_STATUSES = new Set<MeetingStatus>([
   MeetingStatus.PROCESSING
 ]);
 
+// A job is considered "stuck" if it's still in an active status but the
+// worker hasn't sent a heartbeat in a while. The heartbeat runs every 15s
+// so anything > 90s is definitely wedged.
+const STALE_HEARTBEAT_MS = 90_000;
+
+function isStuck(meeting: MeetingJob): boolean {
+  if (!ACTIVE_STATUSES.has(meeting.status)) return false;
+  if (!meeting.lastHeartbeatAt) {
+    // QUEUED with no heartbeat yet is not stuck — it's waiting for a worker.
+    // Only consider it stuck after 2 minutes of total queue time.
+    return Date.now() - new Date(meeting.createdAt).getTime() > 120_000;
+  }
+  return Date.now() - new Date(meeting.lastHeartbeatAt).getTime() > STALE_HEARTBEAT_MS;
+}
+
 export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
   const hasActiveMeetings = meetings.some((meeting) =>
     ["QUEUED", "CLAIMED", "JOINING", "LIVE", "PROCESSING"].includes(meeting.status)
@@ -74,17 +89,19 @@ export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
                 />
               </div>
             ) : null}
-            <div className="meeting-card-actions">
-              {ACTIVE_STATUSES.has(meeting.status) ? (
+            {!ACTIVE_STATUSES.has(meeting.status) ? (
+              <div className="meeting-card-actions">
+                <DeleteSessionButton meetingId={meeting.id} />
+              </div>
+            ) : isStuck(meeting) ? (
+              <div className="meeting-card-actions">
                 <DeleteSessionButton
                   meetingId={meeting.id}
-                  label="Force delete"
+                  label="Force delete (stuck)"
                   force
                 />
-              ) : (
-                <DeleteSessionButton meetingId={meeting.id} />
-              )}
-            </div>
+              </div>
+            ) : null}
           </Link>
         ))}
       </div>
