@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 
 import { __testing } from "../lib/ai";
 
-const { resolveOllamaHost } = __testing;
+const { resolveOllamaHost, resolveHostedLLMBaseUrl } = __testing;
 
 describe("resolveOllamaHost (SSRF guard)", () => {
   let savedHost: string | undefined;
@@ -73,5 +73,69 @@ describe("resolveOllamaHost (SSRF guard)", () => {
     process.env.OLLAMA_HOST = "http://localhost:11434/////";
     const result = resolveOllamaHost();
     assert.equal(result?.endsWith("/"), false);
+  });
+});
+
+describe("resolveHostedLLMBaseUrl (SSRF guard)", () => {
+  let savedBase: string | undefined;
+  let savedAllow: string | undefined;
+
+  beforeEach(() => {
+    savedBase = process.env.LLM_BASE_URL;
+    savedAllow = process.env.LLM_ALLOWED_HOSTS;
+  });
+
+  afterEach(() => {
+    if (savedBase === undefined) delete process.env.LLM_BASE_URL;
+    else process.env.LLM_BASE_URL = savedBase;
+    if (savedAllow === undefined) delete process.env.LLM_ALLOWED_HOSTS;
+    else process.env.LLM_ALLOWED_HOSTS = savedAllow;
+  });
+
+  it("defaults to Groq when unset", () => {
+    delete process.env.LLM_BASE_URL;
+    delete process.env.LLM_ALLOWED_HOSTS;
+    const result = resolveHostedLLMBaseUrl();
+    assert.match(result, /api\.groq\.com/);
+  });
+
+  it("accepts built-in providers (openrouter)", () => {
+    process.env.LLM_BASE_URL = "https://openrouter.ai/api/v1";
+    assert.doesNotThrow(() => resolveHostedLLMBaseUrl());
+  });
+
+  it("rejects arbitrary hosts not on the allow-list", () => {
+    process.env.LLM_BASE_URL = "https://evil.example.com/v1";
+    delete process.env.LLM_ALLOWED_HOSTS;
+    assert.throws(() => resolveHostedLLMBaseUrl(), /not a known provider/i);
+  });
+
+  it("rejects cloud metadata IPs", () => {
+    process.env.LLM_BASE_URL = "http://169.254.169.254/latest/meta-data";
+    delete process.env.LLM_ALLOWED_HOSTS;
+    assert.throws(() => resolveHostedLLMBaseUrl(), /not a known provider/i);
+  });
+
+  it("allows opting in via LLM_ALLOWED_HOSTS", () => {
+    process.env.LLM_BASE_URL = "https://my-private-llm.example.com/v1";
+    process.env.LLM_ALLOWED_HOSTS = "my-private-llm.example.com";
+    assert.doesNotThrow(() => resolveHostedLLMBaseUrl());
+  });
+
+  it("rejects file:// protocol", () => {
+    process.env.LLM_BASE_URL = "file:///etc/passwd";
+    delete process.env.LLM_ALLOWED_HOSTS;
+    assert.throws(() => resolveHostedLLMBaseUrl(), /must be http/i);
+  });
+
+  it("rejects garbage URLs", () => {
+    process.env.LLM_BASE_URL = "not a url";
+    assert.throws(() => resolveHostedLLMBaseUrl(), /not a valid URL/i);
+  });
+
+  it("strips trailing slashes", () => {
+    process.env.LLM_BASE_URL = "https://api.groq.com/openai/v1///";
+    const result = resolveHostedLLMBaseUrl();
+    assert.equal(result.endsWith("/"), false);
   });
 });

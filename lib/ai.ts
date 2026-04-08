@@ -50,7 +50,41 @@ type OllamaGenerateResponse = {
   response?: string;
 };
 
+type OpenAIChatResponse = {
+  choices?: Array<{
+    message?: {
+      content?: string | null;
+    };
+  }>;
+};
+
 const LOCALHOST_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+
+// Hosted LLM provider allow-list. These are well-known OpenAI-compatible
+// inference endpoints that offer free tiers for open-source models (Llama,
+// Mixtral, DeepSeek, Qwen, etc). Only hostnames in this set are allowed by
+// default — anything else must be opted into via LLM_ALLOWED_HOSTS.
+const DEFAULT_LLM_HOSTS = new Set([
+  "api.groq.com",
+  "openrouter.ai",
+  "api-inference.huggingface.co",
+  "api.cloudflare.com",
+  "api.together.xyz",
+  "api.deepinfra.com"
+]);
+
+// Default to Groq — free tier, very fast, runs Llama 3.3 70B. Users who
+// want a different provider override LLM_BASE_URL + LLM_MODEL.
+const DEFAULT_LLM_BASE_URL = "https://api.groq.com/openai/v1";
+const DEFAULT_LLM_MODEL = "llama-3.3-70b-versatile";
+
+// Truncate long transcripts before sending to the LLM. Groq/OpenRouter free
+// tiers have context limits (8k-32k tokens) and we don't want to get rate
+// limited for sending a novel. ~24k chars ≈ 6-8k tokens in English, safe.
+const LLM_MAX_TRANSCRIPT_CHARS = 24_000;
+
+const SUMMARY_SYSTEM_PROMPT =
+  "You are a meeting-notes assistant. Summarize transcripts into concise, well-structured notes. Use plain text only — no markdown, no emoji. Always output exactly four sections with these exact headings on their own lines: Overview, Decisions, Action Items, Risks. Under each heading, write bullet points that start with '- '. If a section has nothing to report, write '- None.' — never omit a section. Keep bullets factual and short.";
 
 /**
  * Validate the Ollama host to prevent SSRF. We allow:
@@ -96,8 +130,49 @@ function resolveOllamaHost(): string | null {
   return parsed.toString().replace(/\/+$/, "");
 }
 
+/**
+ * Validate the hosted-LLM base URL the same way we validate Ollama — the
+ * configured host must resolve to one of our known safe inference providers
+ * (or be explicitly listed in LLM_ALLOWED_HOSTS). This prevents an attacker
+ * or misconfiguration from pointing the summarizer at cloud metadata IPs
+ * (169.254.169.254) or internal services.
+ */
+function resolveHostedLLMBaseUrl(): string {
+  const raw = (process.env.LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL).trim();
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`LLM_BASE_URL is not a valid URL: ${raw}`);
+  }
+
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error(`LLM_BASE_URL must be http:// or https://, got ${parsed.protocol}`);
+  }
+
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+  const extraHosts = new Set(
+    (process.env.LLM_ALLOWED_HOSTS ?? "")
+      .split(",")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  const isDefaultAllowed = DEFAULT_LLM_HOSTS.has(hostname);
+  const isExplicitlyAllowed = extraHosts.has(hostname);
+
+  if (!isDefaultAllowed && !isExplicitlyAllowed) {
+    throw new Error(
+      `LLM_BASE_URL ${hostname} is not a known provider. Add it to LLM_ALLOWED_HOSTS if you trust it.`
+    );
+  }
+
+  return parsed.toString().replace(/\/+$/, "");
+}
+
 // Exported for unit tests.
-export const __testing = { resolveOllamaHost };
+export const __testing = { resolveOllamaHost, resolveHostedLLMBaseUrl };
 
 function tokenize(text: string) {
   return text.toLowerCase().match(/[a-z0-9']+/g) ?? [];
@@ -254,6 +329,79 @@ function formatSummarySection(items: string[]) {
   return items.map((item) => `- ${item}`);
 }
 
+/**
+ * Summarize with a hosted OpenAI-compatible chat-completions endpoint.
+ * Designed to work with free-tier open-source model providers — Groq by
+ * default, or any endpoint whitelisted via LLM_ALLOWED_HOSTS.
+ *
+ * Returns null when the feature is not configured (no LLM_API_KEY), so the
+ * caller can fall back to Ollama or the local heuristic summary.
+ */
+async function summarizeWithHostedLLM(transcript: string) {
+  const apiKey = process.env.LLM_API_KEY?.trim();
+  if (!apiKey) {
+    return null;
+  }
+
+  const baseUrl = resolveHostedLLMBaseUrl();
+  const model = (process.env.LLM_MODEL ?? DEFAULT_LLM_MODEL).trim();
+
+  // Keep the prompt inside the free-tier context window.
+  const truncated =
+    transcript.length > LLM_MAX_TRANSCRIPT_CHARS
+      ? `${transcript.slice(0, LLM_MAX_TRANSCRIPT_CHARS)}\n\n[Transcript truncated for length.]`
+      : transcript;
+
+  return withRetry(
+    async () => {
+      const response = await fetch(`${baseUrl}/chat/completions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model,
+          temperature: 0.2,
+          max_tokens: 800,
+          messages: [
+            { role: "system", content: SUMMARY_SYSTEM_PROMPT },
+            {
+              role: "user",
+              content: `Summarize the following meeting transcript:\n\n${truncated}`
+            }
+          ]
+        }),
+        signal: AbortSignal.timeout(60_000)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        // Surface 4xx clearly so the caller stops retrying auth problems.
+        throw new Error(
+          `Hosted LLM summary failed: ${response.status} ${errorText.slice(0, 400)}`
+        );
+      }
+
+      const payload = (await response.json()) as OpenAIChatResponse;
+      const content = payload.choices?.[0]?.message?.content?.trim();
+      return content || null;
+    },
+    {
+      label: "hosted llm summarize",
+      attempts: 3,
+      isRetryable: (error) => {
+        if (!(error instanceof Error)) return true;
+        const message = error.message.toLowerCase();
+        // Never retry: SSRF guard, config errors, auth failures, bad requests.
+        if (/not allowed|not a valid url|must be http/i.test(error.message)) return false;
+        if (/\b4(0[01345689]|1[0-9])\b/.test(message)) return false; // 4xx except 408/429
+        return true;
+      }
+    }
+  );
+}
+
 async function summarizeWithOllama(transcript: string) {
   const model = process.env.OLLAMA_MODEL?.trim();
 
@@ -315,6 +463,22 @@ export async function summarizeTranscript(transcript: string) {
 
   if (normalized.length < 40) {
     return buildHeuristicSummary(normalized);
+  }
+
+  // Priority order:
+  //   1. Hosted open-source LLM (Groq / OpenRouter / etc) if LLM_API_KEY set
+  //   2. Self-hosted Ollama if OLLAMA_MODEL set
+  //   3. Lightweight local heuristic summary (always available fallback)
+  try {
+    const hostedSummary = await summarizeWithHostedLLM(normalized);
+    if (hostedSummary) {
+      return hostedSummary;
+    }
+  } catch (error) {
+    console.warn(
+      "[ai] Hosted LLM summary failed, falling back.",
+      error instanceof Error ? error.message : error
+    );
   }
 
   try {
