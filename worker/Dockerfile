@@ -13,14 +13,10 @@ COPY worker ./worker
 COPY tsconfig.worker.json ./
 
 RUN npm ci
-RUN apt-get update && apt-get install -y --no-install-recommends git cmake build-essential ca-certificates curl && rm -rf /var/lib/apt/lists/*
-RUN git clone --depth 1 https://github.com/ggml-org/whisper.cpp.git /tmp/whisper.cpp
-RUN cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build -DCMAKE_BUILD_TYPE=Release
-RUN cmake --build /tmp/whisper.cpp/build --config Release -j
-RUN mkdir -p /opt/whisper.cpp/bin /opt/whisper.cpp/models
-RUN cp /tmp/whisper.cpp/build/bin/whisper-cli /opt/whisper.cpp/bin/whisper-cli
-RUN bash /tmp/whisper.cpp/models/download-ggml-model.sh tiny.en
-RUN cp /tmp/whisper.cpp/models/ggml-tiny.en.bin /opt/whisper.cpp/models/ggml-tiny.en.bin
+# whisper.cpp is no longer compiled at build time — transcription now uses
+# Groq's free hosted Whisper API via LLM_API_KEY. The build is 10+ min
+# faster without compiling it. If you want local whisper.cpp, install it
+# in your own derived image and set WHISPER_CPP_BINARY / WHISPER_MODEL_PATH.
 RUN mkdir -p /ms-playwright
 RUN npx playwright install --no-shell chromium
 RUN npx prisma generate
@@ -38,10 +34,6 @@ ENV XDG_RUNTIME_DIR=/tmp/runtime-node
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 ENV PLAYWRIGHT_HEADLESS=false
 ENV WORKER_PORT=8080
-ENV WHISPER_CPP_BINARY=/opt/whisper.cpp/bin/whisper-cli
-ENV WHISPER_MODEL_PATH=/opt/whisper.cpp/models/ggml-tiny.en.bin
-ENV WHISPER_LANGUAGE=en
-ENV WHISPER_THREADS=4
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
   ca-certificates \
@@ -88,7 +80,6 @@ COPY --from=build /app/prisma ./prisma
 COPY --from=build /app/worker/start-worker.sh ./worker/start-worker.sh
 COPY --from=build /app/worker/scripts ./worker/scripts
 COPY --from=build /ms-playwright /ms-playwright
-COPY --from=build /opt/whisper.cpp /opt/whisper.cpp
 
 RUN mkdir -p /tmp/runtime-node /app/worker/output \
   && chmod +x worker/start-worker.sh worker/scripts/start-recording.sh \
