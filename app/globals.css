@@ -226,12 +226,15 @@ textarea {
 }
 
 .primary-button,
-.ghost-button {
+.ghost-button,
+.danger-button {
   border: 0;
   border-radius: 999px;
   padding: 14px 18px;
   cursor: pointer;
   transition: transform 120ms ease, opacity 120ms ease;
+  font: inherit;
+  text-decoration: none;
 }
 
 .primary-button {
@@ -245,15 +248,45 @@ textarea {
   background: rgba(255, 255, 255, 0.06);
 }
 
+.danger-button {
+  color: #fff5f5;
+  background: linear-gradient(135deg, #ff5b6b, #c13445);
+  font-weight: 700;
+}
+
+.danger-link {
+  color: #ffbec5 !important;
+}
+
 .primary-button:hover,
-.ghost-button:hover {
+.ghost-button:hover,
+.danger-button:hover {
   transform: translateY(-1px);
 }
 
-.primary-button:disabled {
+.primary-button:disabled,
+.ghost-button:disabled,
+.danger-button:disabled {
   opacity: 0.55;
   cursor: wait;
   transform: none;
+}
+
+.delete-session-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.delete-error {
+  color: #ffc4cd;
+  font-size: 0.85rem;
+}
+
+.meeting-card-actions {
+  margin-top: 12px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .form-error {

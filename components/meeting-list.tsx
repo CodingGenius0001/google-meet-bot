@@ -1,9 +1,18 @@
 import Link from "next/link";
-import type { MeetingJob } from "@prisma/client";
+import { MeetingStatus, type MeetingJob } from "@prisma/client";
 
 import { AutoRefresh } from "@/components/auto-refresh";
+import { DeleteSessionButton } from "@/components/delete-session-button";
 import { LocalDateTime } from "@/components/local-date-time";
 import { StatusPill } from "@/components/status-pill";
+
+const ACTIVE_STATUSES = new Set<MeetingStatus>([
+  MeetingStatus.QUEUED,
+  MeetingStatus.CLAIMED,
+  MeetingStatus.JOINING,
+  MeetingStatus.LIVE,
+  MeetingStatus.PROCESSING
+]);
 
 export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
   const hasActiveMeetings = meetings.some((meeting) =>
@@ -55,6 +64,11 @@ export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
                 <span className="metadata-value">{meeting.aiSummary ? "Ready" : "Pending"}</span>
               </div>
             </div>
+            {!ACTIVE_STATUSES.has(meeting.status) ? (
+              <div className="meeting-card-actions">
+                <DeleteSessionButton meetingId={meeting.id} />
+              </div>
+            ) : null}
           </Link>
         ))}
       </div>

@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import { redirect } from "next/navigation";
 
 import { AutoRefresh } from "@/components/auto-refresh";
+import { DeleteSessionButton } from "@/components/delete-session-button";
 import { LocalDateTime } from "@/components/local-date-time";
 import { StatusPill } from "@/components/status-pill";
 import { getDashboardSession } from "@/lib/auth-server";
@@ -97,6 +98,9 @@ export default async function MeetingDetailPage({ params }: PageProps) {
             <a className="ghost-button" href={recordingUrl} target="_blank" rel="noreferrer">
               Open in new tab
             </a>
+          ) : null}
+          {!isActive ? (
+            <DeleteSessionButton meetingId={meeting.id} redirectTo="/" variant="primary" />
           ) : null}
         </div>
       </div>
