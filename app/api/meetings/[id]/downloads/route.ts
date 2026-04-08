@@ -2,7 +2,10 @@ import path from "node:path";
 
 import { NextResponse } from "next/server";
 
+import { getDashboardSession } from "@/lib/auth-server";
 import { getMeetingJob } from "@/lib/meetings";
+
+export const dynamic = "force-dynamic";
 
 type RouteProps = {
   params: Promise<{
@@ -66,6 +69,14 @@ function buildAttachmentHeaders(fileName: string, contentType: string) {
 }
 
 export async function GET(request: Request, { params }: RouteProps) {
+  const session = await getDashboardSession();
+  if (!session) {
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   const { id } = await params;
   const meeting = await getMeetingJob(id);
 

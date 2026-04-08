@@ -15,7 +15,9 @@
   "include": [
     "worker/src/**/*.ts",
     "lib/ai.ts",
+    "lib/env.ts",
     "lib/prisma.ts",
+    "lib/retry.ts",
     "lib/storage.ts"
   ]
 }

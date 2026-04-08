@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Manrope, Space_Grotesk } from "next/font/google";
 import type { ReactNode } from "react";
 
+import { AuthProvider } from "@/components/auth-provider";
 import "@/app/globals.css";
 
 const bodyFont = Manrope({
@@ -26,7 +27,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className={`${bodyFont.variable} ${displayFont.variable}`}>{children}</body>
+      <body className={`${bodyFont.variable} ${displayFont.variable}`}>
+        <AuthProvider>{children}</AuthProvider>
+      </body>
     </html>
   );
 }

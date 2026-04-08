@@ -57,6 +57,12 @@ textarea {
   margin-bottom: 28px;
 }
 
+.signout {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
 .brand {
   display: inline-flex;
   align-items: center;

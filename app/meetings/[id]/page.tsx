@@ -2,9 +2,12 @@ import Link from "next/link";
 import { MeetingStatus } from "@prisma/client";
 import { notFound } from "next/navigation";
 
+import { redirect } from "next/navigation";
+
 import { AutoRefresh } from "@/components/auto-refresh";
 import { LocalDateTime } from "@/components/local-date-time";
 import { StatusPill } from "@/components/status-pill";
+import { getDashboardSession } from "@/lib/auth-server";
 import { getMeetingJob } from "@/lib/meetings";
 
 export const dynamic = "force-dynamic";
@@ -30,6 +33,11 @@ const ACTIVE_STATUSES = new Set<MeetingStatus>([
 ]);
 
 export default async function MeetingDetailPage({ params }: PageProps) {
+  const session = await getDashboardSession();
+  if (!session) {
+    redirect("/signin" as never);
+  }
+
   const { id } = await params;
   const meeting = await getMeetingJob(id);
 

@@ -44,9 +44,60 @@ const STOPWORDS = new Set([
   "your"
 ]);
 
+import { withRetry } from "./retry";
+
 type OllamaGenerateResponse = {
   response?: string;
 };
+
+const LOCALHOST_HOSTNAMES = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
+
+/**
+ * Validate the Ollama host to prevent SSRF. We allow:
+ *  - localhost / loopback (default for self-hosted Ollama)
+ *  - any hostname explicitly listed in OLLAMA_ALLOWED_HOSTS (comma-separated)
+ *
+ * Bare IPs that are not loopback are rejected unless allow-listed, since they
+ * could point at cloud metadata endpoints (169.254.169.254) or internal services.
+ */
+function resolveOllamaHost(): string | null {
+  const raw = (process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434").trim();
+
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    throw new Error(`OLLAMA_HOST is not a valid URL: ${raw}`);
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(`OLLAMA_HOST must be http:// or https://, got ${parsed.protocol}`);
+  }
+
+  // URL.hostname returns IPv6 addresses wrapped in square brackets, e.g. "[::1]".
+  // Strip them so we can compare against the loopback set.
+  const hostname = parsed.hostname.toLowerCase().replace(/^\[/, "").replace(/\]$/, "");
+  const allowList = new Set(
+    (process.env.OLLAMA_ALLOWED_HOSTS ?? "")
+      .split(",")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean)
+  );
+
+  const isLocalhost = LOCALHOST_HOSTNAMES.has(hostname);
+  const isAllowListed = allowList.has(hostname);
+
+  if (!isLocalhost && !isAllowListed) {
+    throw new Error(
+      `OLLAMA_HOST ${hostname} is not allowed. Use localhost or add it to OLLAMA_ALLOWED_HOSTS.`
+    );
+  }
+
+  return parsed.toString().replace(/\/+$/, "");
+}
+
+// Exported for unit tests.
+export const __testing = { resolveOllamaHost };
 
 function tokenize(text: string) {
   return text.toLowerCase().match(/[a-z0-9']+/g) ?? [];
@@ -210,35 +261,53 @@ async function summarizeWithOllama(transcript: string) {
     return null;
   }
 
-  const host = (process.env.OLLAMA_HOST ?? "http://127.0.0.1:11434").replace(/\/+$/, "");
-  const response = await fetch(`${host}/api/generate`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      prompt: [
-        "Summarize this meeting transcript.",
-        "Return plain text with these exact sections:",
-        "Overview",
-        "Decisions",
-        "Action Items",
-        "Risks",
-        "",
-        transcript
-      ].join("\n")
-    })
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Ollama summary request failed: ${response.status} ${errorText}`);
+  const host = resolveOllamaHost();
+  if (!host) {
+    return null;
   }
 
-  const payload = (await response.json()) as OllamaGenerateResponse;
-  return payload.response?.trim() || null;
+  return withRetry(
+    async () => {
+      const response = await fetch(`${host}/api/generate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model,
+          stream: false,
+          prompt: [
+            "Summarize this meeting transcript.",
+            "Return plain text with these exact sections:",
+            "Overview",
+            "Decisions",
+            "Action Items",
+            "Risks",
+            "",
+            transcript
+          ].join("\n")
+        }),
+        signal: AbortSignal.timeout(120_000)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Ollama summary request failed: ${response.status} ${errorText}`);
+      }
+
+      const payload = (await response.json()) as OllamaGenerateResponse;
+      return payload.response?.trim() || null;
+    },
+    {
+      label: "ollama summarize",
+      attempts: 3,
+      // Don't retry permanent SSRF/auth errors.
+      isRetryable: (error) => {
+        if (!(error instanceof Error)) return true;
+        return !/not allowed|not a valid URL|must be http/i.test(error.message);
+      }
+    }
+  );
 }
 
 export async function summarizeTranscript(transcript: string) {

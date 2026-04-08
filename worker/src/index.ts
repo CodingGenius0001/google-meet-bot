@@ -3,14 +3,20 @@ import { createServer, type Server } from "node:http";
 
 import { MeetingStatus, type MeetingJob } from "@prisma/client";
 
+import { requireWorkerEnv } from "../../lib/env";
 import { prisma } from "../../lib/prisma";
+import { sweepOrphanRecordings } from "./services/recording-cleanup";
 import { processMeetingJob } from "./services/meeting-runner";
 import { logger } from "./utils/logger";
+
+requireWorkerEnv();
 
 const WORKER_ID = process.env.WORKER_ID ?? `meet-worker-${randomUUID()}`;
 const WORKER_PORT = Number(process.env.PORT ?? process.env.WORKER_PORT ?? 0);
 const SUMMON_TOKEN = process.env.WORKER_SUMMON_TOKEN?.trim() || null;
 const WORKER_POLL_INTERVAL_MS = Math.max(0, Number(process.env.WORKER_POLL_INTERVAL_MS ?? 0) || 0);
+const HEALTH_DB_TIMEOUT_MS = 3000;
+const CLAIM_MAX_CANDIDATES = 10;
 
 let shuttingDown = false;
 let queueDrainRequested = false;
@@ -24,40 +30,48 @@ const shutdownPromise = new Promise<void>((resolve) => {
 });
 
 async function claimNextJob(): Promise<MeetingJob | null> {
-  const candidate = await prisma.meetingJob.findFirst({
+  // Walk through up to CLAIM_MAX_CANDIDATES queued jobs. The conditional
+  // updateMany is the actual atomic claim — if a competing worker grabbed
+  // the same row first, count will be 0 and we move to the next candidate
+  // instead of giving up like the old implementation did.
+  const candidates = await prisma.meetingJob.findMany({
     where: {
       status: MeetingStatus.QUEUED
     },
     orderBy: {
       createdAt: "asc"
-    }
-  });
-
-  if (!candidate) {
-    return null;
-  }
-
-  const claim = await prisma.meetingJob.updateMany({
-    where: {
-      id: candidate.id,
-      status: MeetingStatus.QUEUED
     },
-    data: {
-      status: MeetingStatus.CLAIMED,
-      workerId: WORKER_ID,
-      lastHeartbeatAt: new Date()
-    }
+    take: CLAIM_MAX_CANDIDATES,
+    select: { id: true }
   });
 
-  if (claim.count === 0) {
-    return null;
+  for (const candidate of candidates) {
+    const claim = await prisma.meetingJob.updateMany({
+      where: {
+        id: candidate.id,
+        status: MeetingStatus.QUEUED
+      },
+      data: {
+        status: MeetingStatus.CLAIMED,
+        workerId: WORKER_ID,
+        lastHeartbeatAt: new Date()
+      }
+    });
+
+    if (claim.count === 0) {
+      continue;
+    }
+
+    const claimed = await prisma.meetingJob.findUnique({
+      where: { id: candidate.id }
+    });
+
+    if (claimed) {
+      return claimed;
+    }
   }
 
-  return prisma.meetingJob.findUnique({
-    where: {
-      id: candidate.id
-    }
-  });
+  return null;
 }
 
 async function disconnectPrisma() {
@@ -115,6 +129,10 @@ function requestQueueDrain(source: string) {
 
 async function main() {
   healthServer = startHealthServer();
+  // Best-effort cleanup of any recordings left over from a crashed worker.
+  await sweepOrphanRecordings().catch((error: unknown) => {
+    logger.warn("Orphan recording sweep failed at startup.", error);
+  });
   startPoller();
   logger.info("Meet bot worker started.", {
     workerId: WORKER_ID,
@@ -124,6 +142,21 @@ async function main() {
 
   await shutdownPromise;
   await disconnectPrisma();
+}
+
+async function checkDatabase(): Promise<boolean> {
+  try {
+    await Promise.race([
+      prisma.$queryRaw`SELECT 1`,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("DB health check timed out")), HEALTH_DB_TIMEOUT_MS)
+      )
+    ]);
+    return true;
+  } catch (error) {
+    logger.warn("Worker DB health check failed.", error);
+    return false;
+  }
 }
 
 function handleShutdown(signal: string) {
@@ -150,19 +183,21 @@ function startHealthServer() {
     return null;
   }
 
-  const server = createServer((request, response) => {
+  const server = createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
 
     if (request.method === "GET" && url.pathname === "/healthz") {
-      response.writeHead(200, { "Content-Type": "application/json" });
+      const dbOk = await checkDatabase();
+      response.writeHead(dbOk ? 200 : 503, { "Content-Type": "application/json" });
       response.end(
         JSON.stringify({
-          ok: true,
+          ok: dbOk,
           service: "worker",
           workerId: WORKER_ID,
           shuttingDown,
           busy: Boolean(queueDrainPromise),
           activeJobId,
+          db: dbOk ? "ok" : "unreachable",
           pollIntervalMs: WORKER_POLL_INTERVAL_MS || null,
           timestamp: new Date().toISOString()
         })

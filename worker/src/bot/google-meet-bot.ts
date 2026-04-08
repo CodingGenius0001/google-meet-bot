@@ -41,6 +41,12 @@ type BotOptions = {
 const JOIN_TIMEOUT_MS = Number(process.env.JOIN_TIMEOUT_MS ?? 180000);
 const SOLO_GRACE_PERIOD_MS = Number(process.env.SOLO_GRACE_PERIOD_MS ?? 60000);
 const DEFAULT_GUEST_NAME = process.env.GOOGLE_MEET_GUEST_NAME?.trim() || "MeetMate Bot";
+// Hard cap so a stuck monitor loop or unresponsive Meet UI can never produce
+// an unbounded recording. Default 4h.
+const MAX_RECORDING_DURATION_MS = Math.max(
+  60_000,
+  Number(process.env.MAX_RECORDING_DURATION_MS ?? 4 * 60 * 60 * 1000) || 4 * 60 * 60 * 1000
+);
 
 export class GoogleMeetBot {
   private readonly transcriptSegments: TranscriptSegment[] = [];
@@ -49,6 +55,8 @@ export class GoogleMeetBot {
   private context: BrowserContext | null = null;
   private page: Page | null = null;
   private recorderProcess: ChildProcess | null = null;
+  private recordingTimeoutTimer: NodeJS.Timeout | null = null;
+  private recordingHardStopReached = false;
 
   constructor(private readonly options: BotOptions) {}
 
@@ -356,6 +364,10 @@ export class GoogleMeetBot {
       stdio: ["ignore", "pipe", "pipe"]
     });
 
+    this.recorderProcess.on("error", (error) => {
+      logger.error("Recorder process error.", error);
+    });
+
     this.recorderProcess.stdout?.on("data", (data: Buffer) => {
       logger.info("Recorder", data.toString().trim());
     });
@@ -364,11 +376,37 @@ export class GoogleMeetBot {
       logger.warn("Recorder stderr", data.toString().trim());
     });
 
+    // Hard cap on recording duration. If the monitor loop ever hangs or Meet
+    // never produces an end-of-call signal, this guarantees the FFmpeg child
+    // is terminated and the worker can move on.
+    this.recordingHardStopReached = false;
+    this.recordingTimeoutTimer = setTimeout(() => {
+      this.recordingHardStopReached = true;
+      logger.warn("Recording exceeded MAX_RECORDING_DURATION_MS — terminating recorder.", {
+        maxMs: MAX_RECORDING_DURATION_MS
+      });
+      this.stopRecording().catch((error) => {
+        logger.warn("Forced recorder stop failed.", error);
+      });
+    }, MAX_RECORDING_DURATION_MS);
+    if (typeof (this.recordingTimeoutTimer as { unref?: () => void }).unref === "function") {
+      (this.recordingTimeoutTimer as { unref: () => void }).unref();
+    }
+
     await this.getPage().waitForTimeout(1500);
     return outputPath;
   }
 
+  hasReachedRecordingLimit() {
+    return this.recordingHardStopReached;
+  }
+
   private async stopRecording() {
+    if (this.recordingTimeoutTimer) {
+      clearTimeout(this.recordingTimeoutTimer);
+      this.recordingTimeoutTimer = null;
+    }
+
     if (!this.recorderProcess) {
       return;
     }
@@ -376,11 +414,19 @@ export class GoogleMeetBot {
     const recorder = this.recorderProcess;
     this.recorderProcess = null;
 
-    recorder.kill("SIGINT");
+    try {
+      recorder.kill("SIGINT");
+    } catch (error) {
+      logger.warn("Recorder SIGINT failed.", error);
+    }
 
     await new Promise<void>((resolve) => {
       const timeout = setTimeout(() => {
-        recorder.kill("SIGKILL");
+        try {
+          recorder.kill("SIGKILL");
+        } catch (error) {
+          logger.warn("Recorder SIGKILL failed.", error);
+        }
         resolve();
       }, 5000);
 
@@ -402,6 +448,18 @@ export class GoogleMeetBot {
     let soloSince: number | null = null;
 
     while (true) {
+      if (this.recordingHardStopReached) {
+        return this.finalizeRun({
+          startedAt,
+          joinedAt,
+          captionsEnabled,
+          participantsPeak,
+          recordingPath,
+          finalStatus: MeetingStatus.ENDED_ROOM_CLOSED,
+          endReason: MeetingEndReason.UNKNOWN
+        });
+      }
+
       const participantCount = await this.readParticipantCount();
       participantsPeak = Math.max(participantsPeak, participantCount ?? participantsPeak);
 

@@ -4,10 +4,12 @@ import { access, mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
+import { withRetry } from "../../../lib/retry";
 import { logger } from "../utils/logger";
 
 const TRANSCRIPTION_SEGMENT_SECONDS = Number(process.env.TRANSCRIPTION_SEGMENT_SECONDS ?? 900);
-const DEFAULT_WHISPER_BINARY = "/opt/whisper.cpp/build/bin/whisper-cli";
+// Match the location the Dockerfile copies whisper-cli to.
+const DEFAULT_WHISPER_BINARY = "/opt/whisper.cpp/bin/whisper-cli";
 const DEFAULT_WHISPER_MODEL = "/opt/whisper.cpp/models/ggml-tiny.en.bin";
 
 async function fileExists(filePath: string) {
@@ -133,10 +135,20 @@ export async function transcribeRecording(recordingPath: string) {
 
     for (const chunkPath of artifacts.chunkPaths) {
       logger.info("Transcribing audio chunk with whisper.cpp.", { chunkPath });
-      const text = await transcribeAudioChunk(chunkPath);
+      try {
+        const text = await withRetry(() => transcribeAudioChunk(chunkPath), {
+          label: `whisper chunk ${path.basename(chunkPath)}`,
+          attempts: 3,
+          baseDelayMs: 1000
+        });
 
-      if (text) {
-        transcriptParts.push(text);
+        if (text) {
+          transcriptParts.push(text);
+        }
+      } catch (error) {
+        // Don't fail the whole transcription because one chunk is broken —
+        // log it and move on so we still get a partial transcript.
+        logger.warn("Skipping audio chunk after retries failed.", { chunkPath, error });
       }
     }
 

@@ -1,10 +1,19 @@
+import { redirect } from "next/navigation";
+
 import { MeetingForm } from "@/components/meeting-form";
 import { MeetingList } from "@/components/meeting-list";
+import { SignOutButton } from "@/components/sign-out-button";
+import { getDashboardSession } from "@/lib/auth-server";
 import { listMeetingJobs } from "@/lib/meetings";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
+  const session = await getDashboardSession();
+  if (!session) {
+    // typedRoutes can't see /signin until next build/dev runs, so cast.
+    redirect("/signin" as never);
+  }
   const meetings = await listMeetingJobs();
 
   return (
@@ -15,6 +24,7 @@ export default async function HomePage() {
           MeetMate
         </div>
         <span className="subtle">Google Meet capture and recap pipeline</span>
+        <SignOutButton email={session.email} />
       </div>
 
       <section className="hero">
