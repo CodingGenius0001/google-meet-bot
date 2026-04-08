@@ -43,6 +43,14 @@ export type MeetingRunResult = {
 type BotOptions = {
   jobId: string;
   meetUrl: string;
+  /**
+   * Called once the bot has been admitted to the meeting and the local
+   * recorder has been started. The runner uses this to flip the DB row
+   * from JOINING to LIVE so the dashboard can reflect the actual state.
+   * Errors thrown from the callback are caught and logged — they must
+   * never break the bot's main flow.
+   */
+  onJoined?: (info: { joinedAt: Date; recordingPath: string | null }) => Promise<void> | void;
 };
 
 const JOIN_TIMEOUT_MS = Number(process.env.JOIN_TIMEOUT_MS ?? 180000);
@@ -109,6 +117,18 @@ export class GoogleMeetBot {
     const joinedAt = new Date();
     const captionsEnabled = await this.enableCaptions();
     const recordingPath = await this.startRecording();
+
+    // Notify the runner that we're fully admitted and recording so it can
+    // update the DB row to LIVE. Swallow errors — callback failures must
+    // never prevent the meeting from being monitored.
+    if (this.options.onJoined) {
+      try {
+        await this.options.onJoined({ joinedAt, recordingPath });
+      } catch (error) {
+        logger.warn("onJoined callback failed.", error);
+      }
+    }
+
     const result = await this.monitorMeeting(startedAt, joinedAt, captionsEnabled, recordingPath);
 
     return result;
@@ -498,6 +518,12 @@ export class GoogleMeetBot {
     const page = this.getPage();
     let participantsPeak = 1;
     let soloSince: number | null = null;
+    // Require isInMeeting() to fail this many consecutive polls before
+    // treating the bot as ejected. A single failure can happen when Meet
+    // relayouts the control bar (e.g. captions toggle, panel open), and
+    // we do NOT want to bail on a UI flicker.
+    const NOT_IN_MEETING_EXIT_THRESHOLD = 3;
+    let notInMeetingStreak = 0;
 
     while (true) {
       if (this.cancelRequested) {
@@ -530,7 +556,12 @@ export class GoogleMeetBot {
       const participantCount = await this.readParticipantCount();
       participantsPeak = Math.max(participantsPeak, participantCount ?? participantsPeak);
 
-      if (await this.pageHasText(/you've been removed from the meeting|removed from the meeting/i)) {
+      // DOM-scoped signal checks. Previously we did regex-on-body-text,
+      // which matched caption text as soon as the user turned captions
+      // on — any caption containing "removed", "ended", "call ended"
+      // etc. immediately killed the session. These helpers look in
+      // headings / dialogs / specific Meet controls instead.
+      if (await this.hasKickedSignal()) {
         return this.finalizeRun({
           startedAt,
           joinedAt,
@@ -542,7 +573,7 @@ export class GoogleMeetBot {
         });
       }
 
-      if (await this.pageHasText(/meeting has ended|call ended|this call has ended/i)) {
+      if (await this.hasRoomEndedSignal()) {
         return this.finalizeRun({
           startedAt,
           joinedAt,
@@ -557,7 +588,7 @@ export class GoogleMeetBot {
       const alone =
         participantCount !== null
           ? participantCount <= 1
-          : await this.pageHasText(/only one here|no one else is here|you're the only one here/i);
+          : await this.hasSoloSignal();
 
       if (alone) {
         soloSince ??= Date.now();
@@ -577,20 +608,160 @@ export class GoogleMeetBot {
         soloSince = null;
       }
 
-      if (!(await this.isInMeeting())) {
-        return this.finalizeRun({
-          startedAt,
-          joinedAt,
-          captionsEnabled,
-          participantsPeak,
-          recordingPath,
-          finalStatus: MeetingStatus.ENDED_ROOM_CLOSED,
-          endReason: MeetingEndReason.UNKNOWN
-        });
+      if (await this.isInMeeting()) {
+        notInMeetingStreak = 0;
+      } else {
+        notInMeetingStreak += 1;
+        if (notInMeetingStreak >= NOT_IN_MEETING_EXIT_THRESHOLD) {
+          logger.warn("Leave button missing for multiple consecutive ticks — exiting monitor.", {
+            jobId: this.options.jobId,
+            threshold: NOT_IN_MEETING_EXIT_THRESHOLD
+          });
+          return this.finalizeRun({
+            startedAt,
+            joinedAt,
+            captionsEnabled,
+            participantsPeak,
+            recordingPath,
+            finalStatus: MeetingStatus.ENDED_ROOM_CLOSED,
+            endReason: MeetingEndReason.UNKNOWN
+          });
+        }
       }
 
       await page.waitForTimeout(5000);
     }
+  }
+
+  /**
+   * Look for Meet's specific "you've been removed" signal rather than
+   * scanning body text (which now includes captions). We check dialogs,
+   * alert roles, and headings, but deliberately skip any element that
+   * looks like a caption/transcript region.
+   */
+  private async hasKickedSignal() {
+    return this.getPage()
+      .evaluate(() => {
+        const CAPTION_HINTS = ["caption", "transcript", "live transcript"];
+        const isCaptionNode = (el: Element | null): boolean => {
+          let cursor: Element | null = el;
+          while (cursor) {
+            const label = (cursor.getAttribute("aria-label") ?? "").toLowerCase();
+            const role = (cursor.getAttribute("role") ?? "").toLowerCase();
+            const dataset = (cursor.getAttribute("data-allocation-index") ?? "")
+              .toLowerCase();
+            if (CAPTION_HINTS.some((hint) => label.includes(hint))) return true;
+            if (role === "region" && label.includes("caption")) return true;
+            if (dataset) return true;
+            cursor = cursor.parentElement;
+          }
+          return false;
+        };
+
+        const candidates = Array.from(
+          document.querySelectorAll(
+            '[role="dialog"], [role="alertdialog"], [role="alert"], h1, h2, [role="heading"]'
+          )
+        );
+
+        for (const node of candidates) {
+          if (isCaptionNode(node)) continue;
+          const text = (node.textContent ?? "").trim();
+          if (!text) continue;
+          if (/you(?:'ve| have) been removed|removed from the (meeting|call)/i.test(text)) {
+            return true;
+          }
+        }
+        return false;
+      })
+      .catch(() => false);
+  }
+
+  /**
+   * Detect the post-call screen — Meet shows either a "Return to home
+   * screen" / "Rejoin" button, or a heading saying the meeting has ended.
+   */
+  private async hasRoomEndedSignal() {
+    return this.getPage()
+      .evaluate(() => {
+        const CAPTION_HINTS = ["caption", "transcript", "live transcript"];
+        const isCaptionNode = (el: Element | null): boolean => {
+          let cursor: Element | null = el;
+          while (cursor) {
+            const label = (cursor.getAttribute("aria-label") ?? "").toLowerCase();
+            if (CAPTION_HINTS.some((hint) => label.includes(hint))) return true;
+            cursor = cursor.parentElement;
+          }
+          return false;
+        };
+
+        // The post-call screen reliably shows a "Return to home screen"
+        // or "Rejoin" button. Neither appears while you're in a call.
+        const buttons = Array.from(document.querySelectorAll("button, a"));
+        for (const button of buttons) {
+          if (isCaptionNode(button)) continue;
+          const text = (button.textContent ?? "").trim().toLowerCase();
+          const label = (button.getAttribute("aria-label") ?? "").trim().toLowerCase();
+          if (/return to home screen|rejoin/.test(text)) return true;
+          if (/return to home screen|rejoin/.test(label)) return true;
+        }
+
+        // Fallback: end-of-meeting heading in a non-caption region.
+        const headings = Array.from(
+          document.querySelectorAll('h1, h2, [role="heading"]')
+        );
+        for (const heading of headings) {
+          if (isCaptionNode(heading)) continue;
+          const text = (heading.textContent ?? "").trim();
+          if (/meeting (has )?ended|you left the (meeting|call)/i.test(text)) {
+            return true;
+          }
+        }
+
+        return false;
+      })
+      .catch(() => false);
+  }
+
+  /**
+   * Fallback solo detection when the participant count can't be read.
+   * Scopes to Meet's own "you're the only one here" notice instead of
+   * body text so captions don't trigger a false solo exit.
+   */
+  private async hasSoloSignal() {
+    return this.getPage()
+      .evaluate(() => {
+        const CAPTION_HINTS = ["caption", "transcript", "live transcript"];
+        const isCaptionNode = (el: Element | null): boolean => {
+          let cursor: Element | null = el;
+          while (cursor) {
+            const label = (cursor.getAttribute("aria-label") ?? "").toLowerCase();
+            if (CAPTION_HINTS.some((hint) => label.includes(hint))) return true;
+            cursor = cursor.parentElement;
+          }
+          return false;
+        };
+
+        const candidates = Array.from(
+          document.querySelectorAll(
+            '[role="dialog"], [role="alertdialog"], [role="status"], [role="heading"], h1, h2, h3'
+          )
+        );
+        for (const node of candidates) {
+          if (isCaptionNode(node)) continue;
+          const text = (node.textContent ?? "").trim();
+          if (!text) continue;
+          if (
+            /only one here|no one else is here|you'?re the only one here|you are the only one here/i.test(
+              text
+            )
+          ) {
+            return true;
+          }
+        }
+        return false;
+      })
+      .catch(() => false);
   }
 
   private async readParticipantCount() {

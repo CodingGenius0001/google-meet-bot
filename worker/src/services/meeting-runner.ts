@@ -78,7 +78,28 @@ async function finalizeJob(
 export async function processMeetingJob(job: MeetingJob, workerId: string) {
   const bot = new GoogleMeetBot({
     jobId: job.id,
-    meetUrl: job.meetUrl
+    meetUrl: job.meetUrl,
+    onJoined: async ({ joinedAt, recordingPath }) => {
+      // Flip the row from JOINING -> LIVE so the dashboard reflects the
+      // actual state. Only succeeds while we still own the row and the
+      // status is active, which keeps this safe against races with
+      // recovery workers.
+      const updated = await updateActiveJob(job.id, workerId, {
+        status: MeetingStatus.LIVE,
+        joinedAt,
+        lastHeartbeatAt: new Date()
+      });
+      if (updated) {
+        logger.info("Bot admitted to meeting — flipped to LIVE.", {
+          jobId: job.id,
+          recording: Boolean(recordingPath)
+        });
+      } else {
+        logger.warn("Could not flip job to LIVE — row is no longer ours.", {
+          jobId: job.id
+        });
+      }
+    }
   });
   let botCleanedUp = false;
   let recordingPathToDelete: string | null = null;

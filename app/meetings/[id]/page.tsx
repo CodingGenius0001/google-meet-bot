@@ -118,7 +118,15 @@ export default async function MeetingDetailPage({ params }: PageProps) {
           <h1 className="page-title">{meeting.title || meeting.meetCode}</h1>
           <p className="subtle">{meeting.meetUrl}</p>
         </div>
-        <StatusPill status={meeting.status} />
+        <div className="status-cluster">
+          <StatusPill status={meeting.status} />
+          {meeting.status === MeetingStatus.LIVE ? (
+            <span className="rec-indicator" aria-label="Recording in progress">
+              <span className="rec-dot" />
+              REC
+            </span>
+          ) : null}
+        </div>
       </header>
 
       <section className="page-columns">
