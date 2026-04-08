@@ -15,9 +15,15 @@ function formatValue(value: Date | string, timeOnly: boolean) {
     return null;
   }
 
+  // Note: `timeZoneName` cannot be combined with `dateStyle`/`timeStyle`
+  // per the ECMA-402 spec (Firefox throws, Chrome silently ignores). Use
+  // explicit component options instead.
   return new Intl.DateTimeFormat(undefined, {
-    ...(timeOnly ? {} : { dateStyle: "medium" }),
-    timeStyle: "short",
+    ...(timeOnly
+      ? {}
+      : { year: "numeric", month: "short", day: "numeric" }),
+    hour: "numeric",
+    minute: "2-digit",
     timeZoneName: "short"
   }).format(date);
 }
