@@ -3,7 +3,7 @@ import { MeetingEndReason, MeetingStatus, Prisma, type MeetingJob } from "@prism
 import { summarizeTranscript } from "../../../lib/ai";
 import { prisma } from "../../../lib/prisma";
 import { uploadRecordingArtifact } from "../../../lib/storage";
-import { GoogleMeetBot } from "../bot/google-meet-bot";
+import { CancelledError, GoogleMeetBot } from "../bot/google-meet-bot";
 import { transcribeRecording } from "./recording-transcription";
 import { deleteRecordingFile } from "./recording-cleanup";
 import { logger } from "../utils/logger";
@@ -106,6 +106,23 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
       }
 
       consecutiveHeartbeatFailures = 0;
+
+      // Poll the cancel flag on every heartbeat. Cheap: we already read the
+      // row to write lastHeartbeatAt, but updateMany doesn't return the row,
+      // so do a tiny select for the one column we care about. No-op once
+      // the bot has already been told to stop.
+      if (!bot.hasCancelRequest()) {
+        const snapshot = await prisma.meetingJob.findUnique({
+          where: { id: job.id },
+          select: { cancelRequestedAt: true }
+        });
+        if (snapshot?.cancelRequestedAt) {
+          logger.info("Dashboard requested stop — forwarding to bot.", {
+            jobId: job.id
+          });
+          bot.requestCancel();
+        }
+      }
     } catch (error) {
       consecutiveHeartbeatFailures += 1;
       logger.warn("Failed to send worker heartbeat.", {
@@ -204,24 +221,42 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
       logger.warn("Could not write final job state — job already terminal.", { jobId: job.id });
     }
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown worker failure.";
-    const endReason = message.includes("Timed out")
-      ? MeetingEndReason.JOIN_TIMEOUT
-      : message.includes("not allowed")
-        ? MeetingEndReason.HOST_NEVER_ADMITTED
-        : MeetingEndReason.UNKNOWN;
+    // A cancellation thrown before the bot was admitted is a clean exit,
+    // not a failure. Mark the job COMPLETED with the CANCELLED end reason
+    // instead of FAILED so the dashboard doesn't show a scary error.
+    if (error instanceof CancelledError) {
+      logger.info("Meeting job cancelled before join.", { jobId: job.id });
+      await finalizeJob(job.id, workerId, {
+        status: MeetingStatus.COMPLETED,
+        endReason: MeetingEndReason.CANCELLED,
+        endedAt: new Date(),
+        lastHeartbeatAt: new Date()
+      }).catch((finalizeError) => {
+        logger.error("Failed to mark job as cancelled.", {
+          jobId: job.id,
+          finalizeError
+        });
+      });
+    } else {
+      const message = error instanceof Error ? error.message : "Unknown worker failure.";
+      const endReason = message.includes("Timed out")
+        ? MeetingEndReason.JOIN_TIMEOUT
+        : message.includes("not allowed")
+          ? MeetingEndReason.HOST_NEVER_ADMITTED
+          : MeetingEndReason.UNKNOWN;
 
-    await finalizeJob(job.id, workerId, {
-      status: MeetingStatus.FAILED,
-      endReason,
-      errorMessage: message.slice(0, 1024),
-      endedAt: new Date(),
-      lastHeartbeatAt: new Date()
-    }).catch((finalizeError) => {
-      logger.error("Failed to mark job as failed.", { jobId: job.id, finalizeError });
-    });
+      await finalizeJob(job.id, workerId, {
+        status: MeetingStatus.FAILED,
+        endReason,
+        errorMessage: message.slice(0, 1024),
+        endedAt: new Date(),
+        lastHeartbeatAt: new Date()
+      }).catch((finalizeError) => {
+        logger.error("Failed to mark job as failed.", { jobId: job.id, finalizeError });
+      });
 
-    logger.error("Meeting job failed.", { jobId: job.id, message });
+      logger.error("Meeting job failed.", { jobId: job.id, message });
+    }
   } finally {
     clearInterval(heartbeat);
 

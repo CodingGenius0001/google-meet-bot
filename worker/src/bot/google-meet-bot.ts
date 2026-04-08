@@ -20,6 +20,13 @@ export type TranscriptSegment = {
   capturedAt: string;
 };
 
+export class CancelledError extends Error {
+  constructor(message = "Session was cancelled by the user before joining.") {
+    super(message);
+    this.name = "CancelledError";
+  }
+}
+
 export type MeetingRunResult = {
   finalStatus: MeetingStatus;
   endReason: MeetingEndReason;
@@ -57,19 +64,47 @@ export class GoogleMeetBot {
   private recorderProcess: ChildProcess | null = null;
   private recordingTimeoutTimer: NodeJS.Timeout | null = null;
   private recordingHardStopReached = false;
+  // Set by the worker's heartbeat loop when the dashboard user clicks
+  // "Stop session". The monitor loop polls this flag and exits cleanly.
+  private cancelRequested = false;
 
   constructor(private readonly options: BotOptions) {}
+
+  /**
+   * Signal the bot that the user wants to stop the session. Safe to call
+   * from any thread/timer — the monitor loop picks it up on its next tick.
+   */
+  requestCancel() {
+    this.cancelRequested = true;
+  }
+
+  hasCancelRequest() {
+    return this.cancelRequested;
+  }
 
   async run() {
     const startedAt = new Date();
 
+    // Fast-path cancel check between each setup phase. Once monitorMeeting
+    // starts it has its own in-loop check.
+    const checkCancel = () => {
+      if (this.cancelRequested) {
+        throw new CancelledError();
+      }
+    };
+
     await this.launch();
+    checkCancel();
     await this.openMeeting();
+    checkCancel();
     await this.dismissPopups();
     await this.disableMediaInputs();
     await this.fillGuestNameIfNeeded();
+    checkCancel();
     await this.joinMeeting();
+    checkCancel();
     await this.waitUntilAdmitted();
+    checkCancel();
 
     const joinedAt = new Date();
     const captionsEnabled = await this.enableCaptions();
@@ -465,6 +500,21 @@ export class GoogleMeetBot {
     let soloSince: number | null = null;
 
     while (true) {
+      if (this.cancelRequested) {
+        logger.info("Cancel request received — leaving the meeting.", {
+          jobId: this.options.jobId
+        });
+        return this.finalizeRun({
+          startedAt,
+          joinedAt,
+          captionsEnabled,
+          participantsPeak,
+          recordingPath,
+          finalStatus: MeetingStatus.COMPLETED,
+          endReason: MeetingEndReason.CANCELLED
+        });
+      }
+
       if (this.recordingHardStopReached) {
         return this.finalizeRun({
           startedAt,

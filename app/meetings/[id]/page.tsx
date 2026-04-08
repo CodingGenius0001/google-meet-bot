@@ -8,6 +8,7 @@ import { AutoRefresh } from "@/components/auto-refresh";
 import { DeleteSessionButton } from "@/components/delete-session-button";
 import { LocalDateTime } from "@/components/local-date-time";
 import { StatusPill } from "@/components/status-pill";
+import { StopSessionButton } from "@/components/stop-session-button";
 import { getDashboardSession } from "@/lib/auth-server";
 import { getMeetingJob } from "@/lib/meetings";
 
@@ -99,6 +100,12 @@ export default async function MeetingDetailPage({ params }: PageProps) {
               Open in new tab
             </a>
           ) : null}
+          {isActive ? (
+            <StopSessionButton
+              meetingId={meeting.id}
+              alreadyRequested={Boolean(meeting.cancelRequestedAt)}
+            />
+          ) : null}
           {!isActive ? (
             <DeleteSessionButton meetingId={meeting.id} redirectTo="/" variant="primary" />
           ) : null}
@@ -173,6 +180,12 @@ export default async function MeetingDetailPage({ params }: PageProps) {
                 <span className="metadata-value">{meeting.workerId ?? "Not claimed yet"}</span>
               </div>
             </div>
+            {meeting.cancelRequestedAt && isActive ? (
+              <p className="empty-state">
+                Stop requested at <LocalDateTime value={meeting.cancelRequestedAt} />. The
+                bot will leave on its next heartbeat tick.
+              </p>
+            ) : null}
             {meeting.errorMessage ? <p className="empty-state">{meeting.errorMessage}</p> : null}
           </div>
 

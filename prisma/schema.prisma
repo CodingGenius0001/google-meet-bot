@@ -26,6 +26,7 @@ enum MeetingEndReason {
   ROOM_ENDED
   LAST_PARTICIPANT_LEFT
   JOIN_TIMEOUT
+  CANCELLED
   UNKNOWN
 }
 
@@ -49,6 +50,9 @@ model MeetingJob {
   participantsPeak Int?
   captionsEnabled  Boolean          @default(false)
   lastHeartbeatAt  DateTime?
+  // Set when a dashboard user clicks "Stop session". The worker polls this
+  // during its heartbeat loop and asks the bot to exit the meeting cleanly.
+  cancelRequestedAt DateTime?
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
