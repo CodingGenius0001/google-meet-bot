@@ -524,6 +524,11 @@ export class GoogleMeetBot {
     // we do NOT want to bail on a UI flicker.
     const NOT_IN_MEETING_EXIT_THRESHOLD = 3;
     let notInMeetingStreak = 0;
+    // Log participant detection once every N ticks (each tick = 5s) so we
+    // can diagnose why solo detection isn't triggering without drowning
+    // the logs.
+    const LOG_EVERY_N_TICKS = 6; // ~every 30s
+    let tickCount = 0;
 
     while (true) {
       if (this.cancelRequested) {
@@ -555,6 +560,17 @@ export class GoogleMeetBot {
 
       const participantCount = await this.readParticipantCount();
       participantsPeak = Math.max(participantsPeak, participantCount ?? participantsPeak);
+
+      tickCount += 1;
+      if (tickCount % LOG_EVERY_N_TICKS === 0) {
+        logger.info("Participant monitor tick.", {
+          jobId: this.options.jobId,
+          participantCount,
+          participantsPeak,
+          soloSinceMs: soloSince ? Date.now() - soloSince : null,
+          soloGraceMs: SOLO_GRACE_PERIOD_MS
+        });
+      }
 
       // DOM-scoped signal checks. Previously we did regex-on-body-text,
       // which matched caption text as soon as the user turned captions
@@ -769,7 +785,48 @@ export class GoogleMeetBot {
 
     return page
       .evaluate(() => {
+        // Strategy 1: count stable participant tiles. Google Meet gives
+        // each tile a `data-participant-id` (remote) plus a self tile with
+        // `data-self-name`. This is the most reliable signal because it
+        // reflects the actual video grid, not UI chrome.
+        const tileIds = new Set<string>();
+        document
+          .querySelectorAll("[data-participant-id]")
+          .forEach((el) => {
+            const id = el.getAttribute("data-participant-id");
+            if (id) tileIds.add(id);
+          });
+
+        // Include the bot itself (self tile) in the count if present.
+        const hasSelf = document.querySelector("[data-self-name]") !== null;
+        const tileCount = tileIds.size + (hasSelf ? 1 : 0);
+        if (tileCount > 0) {
+          return tileCount;
+        }
+
+        // Strategy 2: read the "Show everyone" / people button. Its aria
+        // label or child text usually contains the count in current Meet.
+        const peopleButton = document.querySelector(
+          'button[aria-label*="everyone" i], button[aria-label*="people" i], button[aria-label*="participants" i]'
+        );
+        if (peopleButton) {
+          const label = peopleButton.getAttribute("aria-label") ?? "";
+          const text = peopleButton.textContent ?? "";
+          const combined = `${label} ${text}`;
+          const digitMatch = combined.match(/\d+/);
+          if (digitMatch) {
+            const numeric = Number(digitMatch[0]);
+            if (!Number.isNaN(numeric) && numeric > 0) {
+              return numeric;
+            }
+          }
+        }
+
+        // Strategy 3: legacy fallback — scan buttons/divs for text that
+        // mentions participants with a number. Kept for safety but very
+        // noisy so it runs last.
         const values = Array.from(document.querySelectorAll("button, div"))
+          .slice(0, 500) // bound the scan — Meet has thousands of divs
           .map((element) => {
             const label = element.getAttribute("aria-label") ?? "";
             const text = element.textContent ?? "";
@@ -778,15 +835,9 @@ export class GoogleMeetBot {
           .filter(Boolean);
 
         for (const value of values) {
-          const match = value.match(/participants?|people/i);
-
-          if (!match) {
-            continue;
-          }
-
+          if (!/participants?|people/i.test(value)) continue;
           const digitMatch = value.match(/\d+/);
           const numeric = digitMatch ? Number(digitMatch[0]) : Number.NaN;
-
           if (!Number.isNaN(numeric)) {
             return numeric;
           }
