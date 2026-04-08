@@ -25,11 +25,23 @@ RECORDING_PRESET="${RECORDING_PRESET:-veryfast}"
 RECORDING_CRF="${RECORDING_CRF:-28}"
 RECORDING_AUDIO_BITRATE="${RECORDING_AUDIO_BITRATE:-64k}"
 
-ffmpeg -hide_banner -nostats -loglevel warning -y \
+# `exec` replaces this bash process with ffmpeg so that SIGINT from the
+# parent Node process goes directly to ffmpeg. Without `exec`, bash is
+# the signal target and ffmpeg may never see SIGINT, which means it
+# never writes the MP4 moov atom and the resulting file is unplayable.
+#
+# `+frag_keyframe+empty_moov+default_base_moof` writes a fragmented MP4.
+# Fragmented MP4 is playable at every keyframe boundary even if ffmpeg
+# is killed hard, which is belt-and-suspenders against the same bug.
+# `+faststart` requires a clean shutdown to relocate the moov atom and
+# is therefore a poor fit for recordings that may be interrupted.
+exec ffmpeg -hide_banner -nostats -loglevel warning -y \
+  -thread_queue_size 1024 \
   -video_size "${RECORDING_WIDTH}x${RECORDING_HEIGHT}" \
   -framerate "$RECORDING_FRAMERATE" \
   -f x11grab \
   -i "$DISPLAY_TARGET" \
+  -thread_queue_size 1024 \
   -f pulse \
   -i "$PULSE_TARGET" \
   -c:v libx264 \
@@ -37,7 +49,7 @@ ffmpeg -hide_banner -nostats -loglevel warning -y \
   -crf "$RECORDING_CRF" \
   -tune zerolatency \
   -pix_fmt yuv420p \
-  -movflags +faststart \
+  -movflags +frag_keyframe+empty_moov+default_base_moof \
   -c:a aac \
   -b:a "$RECORDING_AUDIO_BITRATE" \
   -ac 1 \
