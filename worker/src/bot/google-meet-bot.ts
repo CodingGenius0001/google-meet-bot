@@ -97,12 +97,17 @@ export class GoogleMeetBot {
 
   private async launch() {
     const storageState = await resolveStorageState();
+    // Keep the viewport in sync with the Xvfb display / recording capture
+    // size so ffmpeg's x11grab sees the full Chromium window. These fall
+    // back to the start-worker.sh / start-recording.sh defaults.
+    const captureWidth = Number.parseInt(process.env.RECORDING_WIDTH ?? "1280", 10) || 1280;
+    const captureHeight = Number.parseInt(process.env.RECORDING_HEIGHT ?? "720", 10) || 720;
     const browserArgs = [
       "--autoplay-policy=no-user-gesture-required",
       "--disable-blink-features=AutomationControlled",
       "--disable-dev-shm-usage",
       "--use-fake-ui-for-media-stream",
-      "--window-size=1440,960"
+      `--window-size=${captureWidth},${captureHeight}`
     ];
 
     if (!storageState) {
@@ -127,7 +132,7 @@ export class GoogleMeetBot {
 
     this.context = await this.browser.newContext({
       permissions: ["microphone", "camera", "notifications"],
-      viewport: { width: 1440, height: 960 },
+      viewport: { width: captureWidth, height: captureHeight },
       storageState
     });
 
@@ -373,7 +378,19 @@ export class GoogleMeetBot {
     });
 
     this.recorderProcess.stderr?.on("data", (data: Buffer) => {
-      logger.warn("Recorder stderr", data.toString().trim());
+      // FFmpeg writes everything to stderr, including its periodic progress
+      // line ("frame= 1489 fps= 24 ... speed=0.98x"). Those are not warnings —
+      // filter them out and send only actual notices to WARN level.
+      const text = data.toString().trim();
+      if (!text) {
+        return;
+      }
+      const isProgressLine = /^(frame=|size=)/.test(text);
+      if (isProgressLine) {
+        logger.debug("Recorder progress", text);
+        return;
+      }
+      logger.info("Recorder", text);
     });
 
     // Hard cap on recording duration. If the monitor loop ever hangs or Meet

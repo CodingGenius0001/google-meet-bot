@@ -8,8 +8,14 @@ export XDG_RUNTIME_DIR="$RUNTIME_DIR"
 mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 
-echo "Starting Xvfb on $DISPLAY_TARGET"
-Xvfb "$DISPLAY_TARGET" -screen 0 1440x960x24 &
+# Keep the virtual display in sync with the recording capture size so that
+# x11grab captures the full Chromium window (see scripts/start-recording.sh).
+RECORDING_WIDTH="${RECORDING_WIDTH:-1280}"
+RECORDING_HEIGHT="${RECORDING_HEIGHT:-720}"
+export RECORDING_WIDTH RECORDING_HEIGHT
+
+echo "Starting Xvfb on $DISPLAY_TARGET at ${RECORDING_WIDTH}x${RECORDING_HEIGHT}"
+Xvfb "$DISPLAY_TARGET" -screen 0 "${RECORDING_WIDTH}x${RECORDING_HEIGHT}x24" &
 XVFB_PID=$!
 
 cleanup() {
