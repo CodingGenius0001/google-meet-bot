@@ -7,6 +7,7 @@ import { redirect } from "next/navigation";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { DeleteSessionButton } from "@/components/delete-session-button";
 import { LocalDateTime } from "@/components/local-date-time";
+import { ProgressBanner } from "@/components/progress-banner";
 import { StatusPill } from "@/components/status-pill";
 import { StopSessionButton } from "@/components/stop-session-button";
 import { getDashboardSession } from "@/lib/auth-server";
@@ -128,6 +129,12 @@ export default async function MeetingDetailPage({ params }: PageProps) {
           ) : null}
         </div>
       </header>
+
+      <ProgressBanner
+        status={meeting.status}
+        progressNote={meeting.progressNote}
+        isActive={isActive}
+      />
 
       <section className="page-columns">
         <div className="grid">

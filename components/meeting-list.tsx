@@ -4,6 +4,7 @@ import { MeetingStatus, type MeetingJob } from "@prisma/client";
 import { AutoRefresh } from "@/components/auto-refresh";
 import { DeleteSessionButton } from "@/components/delete-session-button";
 import { LocalDateTime } from "@/components/local-date-time";
+import { ProgressBanner } from "@/components/progress-banner";
 import { StatusPill } from "@/components/status-pill";
 
 const ACTIVE_STATUSES = new Set<MeetingStatus>([
@@ -64,6 +65,15 @@ export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {
                 <span className="metadata-value">{meeting.aiSummary ? "Ready" : "Pending"}</span>
               </div>
             </div>
+            {ACTIVE_STATUSES.has(meeting.status) ? (
+              <div className="meeting-card-progress">
+                <ProgressBanner
+                  status={meeting.status}
+                  progressNote={meeting.progressNote}
+                  isActive
+                />
+              </div>
+            ) : null}
             {!ACTIVE_STATUSES.has(meeting.status) ? (
               <div className="meeting-card-actions">
                 <DeleteSessionButton meetingId={meeting.id} />

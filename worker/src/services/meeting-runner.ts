@@ -87,7 +87,10 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
       const updated = await updateActiveJob(job.id, workerId, {
         status: MeetingStatus.LIVE,
         joinedAt,
-        lastHeartbeatAt: new Date()
+        lastHeartbeatAt: new Date(),
+        progressNote: recordingPath
+          ? "In meeting — recording is running."
+          : "In meeting — recording is disabled."
       });
       if (updated) {
         logger.info("Bot admitted to meeting — flipped to LIVE.", {
@@ -101,6 +104,24 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
       }
     }
   });
+
+  // Fire-and-forget helper to publish a short stage note without blocking
+  // the main flow. Failures are swallowed because a progress-note write
+  // must never break the pipeline.
+  const setProgressNote = async (note: string) => {
+    try {
+      await updateActiveJob(job.id, workerId, {
+        progressNote: note,
+        lastHeartbeatAt: new Date()
+      });
+    } catch (error) {
+      logger.warn("Failed to update progress note.", {
+        jobId: job.id,
+        note,
+        error
+      });
+    }
+  };
   let botCleanedUp = false;
   let recordingPathToDelete: string | null = null;
   let consecutiveHeartbeatFailures = 0;
@@ -172,7 +193,8 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
       status: MeetingStatus.JOINING,
       startedAt: new Date(),
       lastHeartbeatAt: new Date(),
-      errorMessage: null
+      errorMessage: null,
+      progressNote: "Starting browser and joining the meeting..."
     });
 
     const result = await bot.run();
@@ -182,43 +204,87 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
 
     await updateActiveJob(job.id, workerId, {
       status: MeetingStatus.PROCESSING,
-      lastHeartbeatAt: new Date()
+      lastHeartbeatAt: new Date(),
+      progressNote: "Meeting ended. Processing recording..."
     });
 
     let recordingUrl: string | null = null;
     let recordingKey: string | null = null;
     let transcriptionFromRecording: string | null = null;
+    let transcriptionErrored = false;
+    let uploadErrored = false;
 
     if (result.recordingPath) {
+      await setProgressNote("Transcribing audio (this can take a few minutes)...");
       try {
         transcriptionFromRecording = await transcribeRecording(result.recordingPath);
       } catch (error) {
+        transcriptionErrored = true;
         logger.warn("Recording transcription failed.", error);
       }
+    } else {
+      await setProgressNote(
+        "No recording was produced (recording is disabled on this worker)."
+      );
     }
 
     if (result.recordingPath) {
+      await setProgressNote("Uploading recording to cloud storage...");
       try {
         const recording = await uploadRecordingArtifact(job.id, result.recordingPath);
         recordingUrl = recording?.url ?? null;
         recordingKey = recording?.key ?? null;
+        if (!recording) {
+          // Silent skip — the env var isn't configured. Tell the user
+          // exactly why their recording didn't show up.
+          await setProgressNote(
+            "Recording upload skipped — BLOB_READ_WRITE_TOKEN is not configured on the worker."
+          );
+        }
       } catch (error) {
+        uploadErrored = true;
         logger.warn("Recording upload failed.", error);
+        await setProgressNote(
+          `Recording upload failed: ${error instanceof Error ? error.message : "unknown error"}`
+        );
       }
     }
 
     let aiSummary: string | null = null;
+    let summaryErrored = false;
     const transcriptText = normalizeTranscriptText(
       transcriptionFromRecording ?? result.transcriptText
     );
 
     if (transcriptText) {
+      await setProgressNote("Generating meeting summary...");
       try {
         aiSummary = await summarizeTranscript(transcriptText);
       } catch (error) {
+        summaryErrored = true;
         logger.warn("Automatic summary generation failed.", error);
       }
     }
+
+    // Build a final progress note that reflects what actually worked so
+    // the user has a clear post-mortem without having to dig through
+    // Railway logs.
+    const finalNoteParts: string[] = [];
+    if (recordingUrl) finalNoteParts.push("recording uploaded");
+    else if (result.recordingPath && !uploadErrored)
+      finalNoteParts.push("recording NOT uploaded (missing BLOB_READ_WRITE_TOKEN)");
+    else if (uploadErrored) finalNoteParts.push("recording upload failed");
+    else finalNoteParts.push("no recording produced");
+
+    if (transcriptText) finalNoteParts.push("transcript ready");
+    else if (transcriptionErrored) finalNoteParts.push("transcription failed");
+    else finalNoteParts.push("no transcript");
+
+    if (aiSummary) finalNoteParts.push("summary generated");
+    else if (summaryErrored) finalNoteParts.push("summary generation failed");
+    else if (transcriptText) finalNoteParts.push("summary skipped");
+
+    const finalNote = finalNoteParts.join(" · ");
 
     const finalized = await finalizeJob(job.id, workerId, {
       status: result.finalStatus,
@@ -235,7 +301,8 @@ export async function processMeetingJob(job: MeetingJob, workerId: string) {
       aiSummary,
       recordingUrl,
       recordingKey,
-      lastHeartbeatAt: new Date()
+      lastHeartbeatAt: new Date(),
+      progressNote: finalNote
     });
 
     if (!finalized) {

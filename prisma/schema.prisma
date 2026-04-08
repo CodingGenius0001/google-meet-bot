@@ -53,6 +53,10 @@ model MeetingJob {
   // Set when a dashboard user clicks "Stop session". The worker polls this
   // during its heartbeat loop and asks the bot to exit the meeting cleanly.
   cancelRequestedAt DateTime?
+  // Short human-readable note the worker writes as it moves through stages
+  // so the dashboard can show "Uploading recording", "Transcribing audio",
+  // etc. Cleared on terminal status.
+  progressNote     String?          @db.Text
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
