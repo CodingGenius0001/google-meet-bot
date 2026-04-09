@@ -18,8 +18,8 @@ PULSE_TARGET="${PULSE_SOURCE:-default}"
 #     23 is libx264 default, 28 is "visibly lossy but fine for a call",
 #     30 is about as high as you want to push it.
 #   RECORDING_AUDIO_BITRATE — AAC bitrate. 64k mono is fine for speech.
-RECORDING_WIDTH="${RECORDING_WIDTH:-1280}"
-RECORDING_HEIGHT="${RECORDING_HEIGHT:-720}"
+RECORDING_WIDTH="${RECORDING_WIDTH:-1920}"
+RECORDING_HEIGHT="${RECORDING_HEIGHT:-1080}"
 # 20 fps is the lowest framerate where screen text stays readable during
 # cursor movement and scroll. 15 was too choppy for reading presented
 # content.
