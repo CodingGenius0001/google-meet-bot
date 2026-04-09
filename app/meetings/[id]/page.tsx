@@ -77,39 +77,38 @@ export default async function MeetingDetailPage({ params }: PageProps) {
         </div>
         <div className="actions">
           <Link className="ghost-button" href="/">
-            Back to dashboard
+            Back
           </Link>
-          {hasTranscript ? (
-            <a
-              className="ghost-button"
-              href={`/api/meetings/${meeting.id}/downloads?kind=transcript`}
-              download
-            >
-              Download transcript
-            </a>
-          ) : null}
-          {hasSummary ? (
-            <a
-              className="ghost-button"
-              href={`/api/meetings/${meeting.id}/downloads?kind=summary`}
-              download
-            >
-              Download summary
-            </a>
-          ) : null}
-          {hasRecording ? (
-            <a
-              className="primary-button"
-              href={`/api/meetings/${meeting.id}/downloads?kind=recording`}
-              download
-            >
-              Download recording
-            </a>
-          ) : null}
-          {hasRecording ? (
-            <a className="ghost-button" href={recordingUrl} target="_blank" rel="noreferrer">
-              Open in new tab
-            </a>
+          {hasTranscript || hasSummary || hasRecording ? (
+            <details className="download-menu">
+              <summary className="ghost-button">Downloads</summary>
+              <div className="download-menu-items">
+                {hasRecording ? (
+                  <a
+                    href={`/api/meetings/${meeting.id}/downloads?kind=recording`}
+                    download
+                  >
+                    Recording (.mp4)
+                  </a>
+                ) : null}
+                {hasTranscript ? (
+                  <a
+                    href={`/api/meetings/${meeting.id}/downloads?kind=transcript`}
+                    download
+                  >
+                    Transcript (.txt)
+                  </a>
+                ) : null}
+                {hasSummary ? (
+                  <a
+                    href={`/api/meetings/${meeting.id}/downloads?kind=summary`}
+                    download
+                  >
+                    Summary (.txt)
+                  </a>
+                ) : null}
+              </div>
+            </details>
           ) : null}
           {isActive ? (
             <StopSessionButton
@@ -121,12 +120,17 @@ export default async function MeetingDetailPage({ params }: PageProps) {
             <DeleteSessionButton
               meetingId={meeting.id}
               redirectTo="/"
-              label="Force delete (stuck)"
+              label="Force delete"
               force
             />
           ) : null}
           {!isActive ? (
-            <DeleteSessionButton meetingId={meeting.id} redirectTo="/" variant="primary" />
+            <DeleteSessionButton
+              meetingId={meeting.id}
+              redirectTo="/"
+              label="Delete"
+              variant="primary"
+            />
           ) : null}
         </div>
       </div>

@@ -162,7 +162,14 @@ export class GoogleMeetBot {
       "--disable-blink-features=AutomationControlled",
       "--disable-dev-shm-usage",
       "--use-fake-ui-for-media-stream",
-      `--window-size=${captureWidth},${captureHeight}`
+      `--window-size=${captureWidth},${captureHeight}`,
+      // Hide all Chromium chrome (tab bar, URL bar, bookmarks) so the
+      // recording only shows the actual Meet page. Without these flags
+      // the top ~100px of the recording is Chrome UI, which the user
+      // does not want in their final video.
+      "--kiosk",
+      "--start-fullscreen",
+      "--window-position=0,0"
     ];
 
     if (!storageState) {

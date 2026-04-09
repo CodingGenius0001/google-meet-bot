@@ -278,6 +278,61 @@ textarea {
   gap: 10px;
 }
 
+/* Downloads dropdown in the detail-page topbar. Uses <details> so it works
+   without any client JS. The marker arrow is hidden because we render our
+   own caret in the summary content. */
+.download-menu {
+  position: relative;
+}
+
+.download-menu > summary {
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+}
+
+.download-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.download-menu > summary::after {
+  content: " ▾";
+  opacity: 0.7;
+  margin-left: 4px;
+}
+
+.download-menu[open] > summary::after {
+  content: " ▴";
+}
+
+.download-menu-items {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--card-strong);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--shadow);
+  z-index: 10;
+}
+
+.download-menu-items a {
+  display: block;
+  padding: 10px 14px;
+  border-radius: 10px;
+  color: var(--text);
+  font-size: 0.92rem;
+}
+
+.download-menu-items a:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
 .delete-error {
   color: #ffc4cd;
   font-size: 0.85rem;
