@@ -20,10 +20,15 @@ PULSE_TARGET="${PULSE_SOURCE:-default}"
 #   RECORDING_AUDIO_BITRATE — AAC bitrate. 64k mono is fine for speech.
 RECORDING_WIDTH="${RECORDING_WIDTH:-1280}"
 RECORDING_HEIGHT="${RECORDING_HEIGHT:-720}"
-RECORDING_FRAMERATE="${RECORDING_FRAMERATE:-15}"
+# 20 fps is the lowest framerate where screen text stays readable during
+# cursor movement and scroll. 15 was too choppy for reading presented
+# content.
+RECORDING_FRAMERATE="${RECORDING_FRAMERATE:-20}"
 RECORDING_PRESET="${RECORDING_PRESET:-veryfast}"
-RECORDING_CRF="${RECORDING_CRF:-28}"
-RECORDING_AUDIO_BITRATE="${RECORDING_AUDIO_BITRATE:-64k}"
+# CRF 23 is the libx264 default "visually lossless for screen content".
+# CRF 28 (previous default) blurs text to the point of unreadability.
+RECORDING_CRF="${RECORDING_CRF:-23}"
+RECORDING_AUDIO_BITRATE="${RECORDING_AUDIO_BITRATE:-96k}"
 
 # `exec` replaces this bash process with ffmpeg so that SIGINT from the
 # parent Node process goes directly to ffmpeg. Without `exec`, bash is

@@ -162,13 +162,12 @@ export class GoogleMeetBot {
       "--disable-blink-features=AutomationControlled",
       "--disable-dev-shm-usage",
       "--use-fake-ui-for-media-stream",
+      // Give Chromium a synthetic mic + camera so Meet never pops its
+      // "Microphone not found — make sure your microphone is plugged in"
+      // modal, which otherwise covers the bottom-left of the recording
+      // for the whole session.
+      "--use-fake-device-for-media-stream",
       `--window-size=${captureWidth},${captureHeight}`,
-      // Hide all Chromium chrome (tab bar, URL bar, bookmarks) so the
-      // recording only shows the actual Meet page. Without these flags
-      // the top ~100px of the recording is Chrome UI, which the user
-      // does not want in their final video.
-      "--kiosk",
-      "--start-fullscreen",
       "--window-position=0,0"
     ];
 
@@ -194,11 +193,37 @@ export class GoogleMeetBot {
 
     this.context = await this.browser.newContext({
       permissions: ["microphone", "camera", "notifications"],
-      viewport: { width: captureWidth, height: captureHeight },
+      // viewport: null disables Playwright's viewport emulation so the
+      // page fills whatever the real Chrome content area is. Combined
+      // with the CDP fullscreen call below, this gives Meet the entire
+      // Xvfb display area with zero browser chrome.
+      viewport: null,
       storageState
     });
 
     this.page = await this.context.newPage();
+
+    // Force the window into real fullscreen via CDP. Playwright silently
+    // ignores --kiosk / --start-fullscreen flags, so we have to do this
+    // after the page exists. Fullscreen hides the tab bar, URL bar, and
+    // bookmarks bar — the page then occupies the entire Xvfb display,
+    // which is exactly what ffmpeg x11grab captures.
+    try {
+      const cdp = await this.context.newCDPSession(this.page);
+      const { windowId } = (await cdp.send("Browser.getWindowForTarget")) as {
+        windowId: number;
+      };
+      await cdp.send("Browser.setWindowBounds", {
+        windowId,
+        bounds: { windowState: "fullscreen" }
+      });
+      await cdp.detach().catch(() => undefined);
+    } catch (error) {
+      logger.warn(
+        "Failed to force fullscreen via CDP — recording may show browser chrome.",
+        error
+      );
+    }
 
     await this.page.exposeFunction("meetBotCaptureCaption", async (segment: TranscriptSegment) => {
       const speaker = segment.speaker.trim() || "Unknown";
