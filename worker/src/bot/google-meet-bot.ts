@@ -677,7 +677,30 @@ export class GoogleMeetBot {
         }
       }
 
-      await page.waitForTimeout(5000);
+      // If the page/context gets torn down mid-loop (Chromium crash, a
+      // concurrent finalizeRun, Railway OOM), waitForTimeout throws
+      // "Target page, context or browser has been closed". That isn't a
+      // job failure — the meeting is just over. Swallow the error and
+      // exit the monitor so the outer flow can finish normally.
+      try {
+        await page.waitForTimeout(5000);
+      } catch (error) {
+        if (page.isClosed()) {
+          logger.warn("Monitor loop woke up to a closed page — exiting.", {
+            jobId: this.options.jobId
+          });
+          return this.finalizeRun({
+            startedAt,
+            joinedAt,
+            captionsEnabled,
+            participantsPeak,
+            recordingPath,
+            finalStatus: MeetingStatus.ENDED_ROOM_CLOSED,
+            endReason: MeetingEndReason.UNKNOWN
+          });
+        }
+        throw error;
+      }
     }
   }
 
