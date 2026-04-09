@@ -15,19 +15,28 @@ const ACTIVE_STATUSES = new Set<MeetingStatus>([
   MeetingStatus.PROCESSING
 ]);
 
-// A job is considered "stuck" if it's still in an active status but the
-// worker hasn't sent a heartbeat in a while. The heartbeat runs every 15s
-// so anything > 90s is definitely wedged.
+// A job is considered "stuck" if it's still in an active status AND
+// either the worker hasn't sent a heartbeat in a while (>90s, i.e. 6+
+// missed ticks) OR the user asked it to stop and the worker didn't
+// acknowledge within ~30s. Either case means the worker is wedged or
+// dead and needs a force delete to clear.
 const STALE_HEARTBEAT_MS = 90_000;
+const STALE_CANCEL_MS = 30_000;
 
 function isStuck(meeting: MeetingJob): boolean {
   if (!ACTIVE_STATUSES.has(meeting.status)) return false;
-  if (!meeting.lastHeartbeatAt) {
-    // QUEUED with no heartbeat yet is not stuck — it's waiting for a worker.
-    // Only consider it stuck after 2 minutes of total queue time.
-    return Date.now() - new Date(meeting.createdAt).getTime() > 120_000;
-  }
-  return Date.now() - new Date(meeting.lastHeartbeatAt).getTime() > STALE_HEARTBEAT_MS;
+
+  const heartbeatStale = meeting.lastHeartbeatAt
+    ? Date.now() - new Date(meeting.lastHeartbeatAt).getTime() > STALE_HEARTBEAT_MS
+    : // QUEUED with no heartbeat yet is not stuck — it's waiting for a
+      // worker. Only consider it stuck after 2 minutes of queue time.
+      Date.now() - new Date(meeting.createdAt).getTime() > 120_000;
+
+  const cancelStuck = meeting.cancelRequestedAt
+    ? Date.now() - new Date(meeting.cancelRequestedAt).getTime() > STALE_CANCEL_MS
+    : false;
+
+  return heartbeatStale || cancelStuck;
 }
 
 export function MeetingList({ meetings }: { meetings: MeetingJob[] }) {

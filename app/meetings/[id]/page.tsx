@@ -58,14 +58,18 @@ export default async function MeetingDetailPage({ params }: PageProps) {
   const isActive = ACTIVE_STATUSES.has(meeting.status);
 
   // A session is considered "stuck" (worth offering Force delete for) if
-  // its heartbeat has gone stale. Healthy active sessions should only
-  // offer Stop, not Force delete.
+  // its heartbeat has gone stale, OR the user already asked it to stop
+  // and the worker didn't acknowledge within ~30s (one heartbeat tick
+  // plus slack). Healthy active sessions should only offer Stop.
   const STALE_HEARTBEAT_MS = 90_000;
-  const isStuck = isActive
-    ? meeting.lastHeartbeatAt
-      ? Date.now() - new Date(meeting.lastHeartbeatAt).getTime() > STALE_HEARTBEAT_MS
-      : Date.now() - new Date(meeting.createdAt).getTime() > 120_000
+  const STALE_CANCEL_MS = 30_000;
+  const heartbeatStale = meeting.lastHeartbeatAt
+    ? Date.now() - new Date(meeting.lastHeartbeatAt).getTime() > STALE_HEARTBEAT_MS
+    : Date.now() - new Date(meeting.createdAt).getTime() > 120_000;
+  const cancelStuck = meeting.cancelRequestedAt
+    ? Date.now() - new Date(meeting.cancelRequestedAt).getTime() > STALE_CANCEL_MS
     : false;
+  const isStuck = isActive && (heartbeatStale || cancelStuck);
 
   return (
     <main className="shell">
