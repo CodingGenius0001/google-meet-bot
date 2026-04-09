@@ -24,12 +24,29 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-# Park the X cursor in the bottom-right corner so it doesn't sit in
-# the middle of every recording. Playwright's page.mouse dispatches
-# CDP synthetic events, not X events, so nothing else moves the real
-# X cursor afterward — one call is enough for the whole session. The
-# retry loop handles Xvfb's brief warmup where it isn't yet accepting
-# X clients.
+# Hide the X cursor entirely. unclutter watches for pointer idleness
+# and hides the cursor when it hasn't moved — which is always, since
+# our container has no real input device. Runs in the background for
+# the whole worker lifetime. This is the primary fix for the default
+# X cursor sitting in the middle of recordings.
+if command -v unclutter >/dev/null 2>&1; then
+  for _ in 1 2 3 4 5; do
+    if DISPLAY="$DISPLAY_TARGET" xset q >/dev/null 2>&1; then
+      break
+    fi
+    sleep 0.2
+  done
+  DISPLAY="$DISPLAY_TARGET" unclutter -idle 0 -root >/dev/null 2>&1 &
+  echo "Started unclutter to hide X cursor."
+else
+  echo "unclutter not found — cursor may be visible in recordings."
+fi
+
+# Belt-and-suspenders: also shove the X cursor into the bottom-right
+# corner so that even if unclutter fails for some reason, the cursor
+# isn't in the middle of the frame. Playwright's page.mouse dispatches
+# CDP synthetic events, not X events, so nothing moves the real X
+# cursor after this — one call is enough.
 for _ in 1 2 3 4 5; do
   if DISPLAY="$DISPLAY_TARGET" xdotool mousemove "$((RECORDING_WIDTH - 1))" "$((RECORDING_HEIGHT - 1))" 2>/dev/null; then
     echo "Parked X cursor at bottom-right corner."
