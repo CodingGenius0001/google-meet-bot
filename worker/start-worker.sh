@@ -24,6 +24,20 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# Park the X cursor in the bottom-right corner so it doesn't sit in
+# the middle of every recording. Playwright's page.mouse dispatches
+# CDP synthetic events, not X events, so nothing else moves the real
+# X cursor afterward — one call is enough for the whole session. The
+# retry loop handles Xvfb's brief warmup where it isn't yet accepting
+# X clients.
+for _ in 1 2 3 4 5; do
+  if DISPLAY="$DISPLAY_TARGET" xdotool mousemove "$((RECORDING_WIDTH - 1))" "$((RECORDING_HEIGHT - 1))" 2>/dev/null; then
+    echo "Parked X cursor at bottom-right corner."
+    break
+  fi
+  sleep 0.2
+done
+
 if pulseaudio --daemonize=yes --exit-idle-time=-1 --log-target=stderr; then
   export PULSE_SERVER="unix:${XDG_RUNTIME_DIR}/pulse/native"
   echo "PulseAudio started."
